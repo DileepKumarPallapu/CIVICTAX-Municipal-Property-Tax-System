@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ValidationRule xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Built_Up_Area_Must_Be_Positive</fullName>
+    <active>true</active>
+    <description>Ensures built-up area is strictly positive for tax calculation</description>
+    <errorConditionFormula>ISBLANK(Built_Up_Area__c) || Built_Up_Area__c &lt;= 0</errorConditionFormula>
+    <errorDisplayField>Built_Up_Area__c</errorDisplayField>
+    <errorMessage>Built-up Area must be greater than zero for municipal property tax assessment.</errorMessage>
+</ValidationRule>

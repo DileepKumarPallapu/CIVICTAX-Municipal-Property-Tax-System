@@ -1,0 +1,18 @@
+{
+  "name": "CIVICTAX — Smart Municipal Platform",
+  "short_name": "CivicTax",
+  "description": "Smart Property Tax Assessment and Municipal Governance Platform",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#101D32",
+  "theme_color": "#101D32",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
