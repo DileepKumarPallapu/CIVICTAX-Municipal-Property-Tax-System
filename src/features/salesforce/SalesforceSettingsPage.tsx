@@ -117,11 +117,18 @@ export const SalesforceSettingsPage: React.FC = () => {
             </span>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
             <div className="p-4 bg-slate-50 rounded-lg border border-slate-200 space-y-1">
               <div className="text-xs text-slate-500 font-medium">Salesforce Instance URL</div>
               <div className="font-semibold text-slate-900 break-all">
-                {status?.instanceUrl || 'Not Connected'}
+                {status?.instanceUrl || 'Not Connected (Local Mode)'}
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-50 rounded-lg border border-slate-200 space-y-1">
+              <div className="text-xs text-slate-500 font-medium">Organization ID</div>
+              <div className="font-semibold text-slate-900 font-mono text-xs">
+                {status?.orgId || 'None (Standby)'}
               </div>
             </div>
 
@@ -138,9 +145,16 @@ export const SalesforceSettingsPage: React.FC = () => {
             </div>
 
             <div className="p-4 bg-slate-50 rounded-lg border border-slate-200 space-y-1">
-              <div className="text-xs text-slate-500 font-medium">OAuth Authentication Protocol</div>
+              <div className="text-xs text-slate-500 font-medium">OAuth Protocol</div>
               <div className="font-semibold text-indigo-700">
-                OAuth 2.0 PKCE (External Client App)
+                OAuth 2.0 PKCE (Connected App)
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-50 rounded-lg border border-slate-200 space-y-1">
+              <div className="text-xs text-slate-500 font-medium">Last Synchronization</div>
+              <div className="font-semibold text-slate-700 text-xs">
+                {status?.lastSync ? new Date(status.lastSync).toLocaleString() : 'Pending Authorization'}
               </div>
             </div>
           </div>
