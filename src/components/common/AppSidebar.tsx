@@ -21,6 +21,7 @@ import {
   ChevronRight,
   ShieldCheck,
   CheckSquare,
+  Sparkles,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
@@ -50,88 +51,88 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
     navigate('/login');
   };
 
-  // Nav Item Definition
   interface NavItem {
     label: string;
     path: string;
     icon: React.ComponentType<{ className?: string }>;
     badge?: number;
+    section?: string;
   }
 
   const citizenNav: NavItem[] = [
-    { label: 'Citizen Dashboard', path: '/citizen', icon: LayoutDashboard },
-    { label: 'My Properties', path: '/citizen/properties', icon: Building2 },
-    { label: 'Register Property', path: '/citizen/register-property', icon: PlusCircle },
-    { label: 'Tax Assessments', path: '/citizen/assessments', icon: Receipt },
-    { label: 'Payment Portal', path: '/citizen/payments', icon: CreditCard },
-    { label: 'Grievances', path: '/citizen/grievances', icon: AlertTriangle },
-    { label: 'Reassessments', path: '/citizen/reassessments', icon: RefreshCw },
-    { label: 'Notifications', path: '/citizen/notifications', icon: Bell, badge: unreadCount },
-    { label: 'Profile Settings', path: '/citizen/profile', icon: User },
+    { label: 'Citizen Dashboard', path: '/citizen', icon: LayoutDashboard, section: 'Core' },
+    { label: 'My Properties', path: '/citizen/properties', icon: Building2, section: 'Properties' },
+    { label: 'Register Property', path: '/citizen/register-property', icon: PlusCircle, section: 'Properties' },
+    { label: 'Tax Assessments', path: '/citizen/assessments', icon: Receipt, section: 'Finance' },
+    { label: 'Payment Portal', path: '/citizen/payments', icon: CreditCard, section: 'Finance' },
+    { label: 'Grievance Redressal', path: '/citizen/grievances', icon: AlertTriangle, section: 'Services' },
+    { label: 'Reassessment Requests', path: '/citizen/reassessments', icon: RefreshCw, section: 'Services' },
+    { label: 'Notifications', path: '/citizen/notifications', icon: Bell, badge: unreadCount, section: 'Account' },
+    { label: 'Profile Settings', path: '/citizen/profile', icon: User, section: 'Account' },
   ];
 
   const officerNav: NavItem[] = [
-    { label: 'Officer Dashboard', path: '/officer', icon: LayoutDashboard },
-    { label: 'Assigned Properties', path: '/officer/assigned-properties', icon: Building2 },
-    { label: 'Property Verification', path: '/officer/verification', icon: CheckSquare },
-    { label: 'Assessment Review', path: '/officer/assessments', icon: Receipt },
-    { label: 'Reassessments', path: '/officer/reassessments', icon: RefreshCw },
-    { label: 'Grievance Triage', path: '/officer/grievances', icon: AlertTriangle },
-    { label: 'Payment Monitoring', path: '/officer/payments', icon: CreditCard },
-    { label: 'Municipal GIS Map', path: '/officer/gis', icon: MapPin },
-    { label: 'Revenue Recovery', path: '/officer/recovery', icon: AlertTriangle },
-    { label: 'Risk & Compliance', path: '/officer/compliance', icon: ShieldCheck },
-    { label: 'Zone Analytics', path: '/officer/zone-analytics', icon: BarChart3 },
-    { label: 'Officer Profile', path: '/officer/profile', icon: User },
+    { label: 'Officer Dashboard', path: '/officer', icon: LayoutDashboard, section: 'Overview' },
+    { label: 'Assigned Properties', path: '/officer/assigned-properties', icon: Building2, section: 'Field Verification' },
+    { label: 'Property Verification', path: '/officer/verification', icon: CheckSquare, section: 'Field Verification' },
+    { label: 'Assessment Review', path: '/officer/assessments', icon: Receipt, section: 'Tax Operations' },
+    { label: 'Reassessments', path: '/officer/reassessments', icon: RefreshCw, section: 'Tax Operations' },
+    { label: 'Grievance Triage', path: '/officer/grievances', icon: AlertTriangle, section: 'Citizen Cases' },
+    { label: 'Payment Monitoring', path: '/officer/payments', icon: CreditCard, section: 'Revenue' },
+    { label: 'Municipal GIS Map', path: '/officer/gis', icon: MapPin, section: 'Spatial Intelligence' },
+    { label: 'Revenue Recovery', path: '/officer/recovery', icon: AlertTriangle, section: 'Spatial Intelligence' },
+    { label: 'Risk & Compliance', path: '/officer/compliance', icon: ShieldCheck, section: 'Spatial Intelligence' },
+    { label: 'Zone Analytics', path: '/officer/zone-analytics', icon: BarChart3, section: 'Spatial Intelligence' },
+    { label: 'Officer Profile', path: '/officer/profile', icon: User, section: 'Account' },
   ];
 
   const adminNav: NavItem[] = [
-    { label: 'Admin Dashboard', path: '/admin', icon: LayoutDashboard },
-    { label: 'Command Center', path: '/admin/command-center', icon: BarChart3 },
-    { label: 'Municipal GIS Map', path: '/admin/gis', icon: MapPin },
-    { label: 'Revenue Recovery', path: '/admin/recovery', icon: AlertTriangle },
-    { label: 'Risk & Compliance', path: '/admin/compliance', icon: ShieldCheck },
-    { label: 'Revenue Forecast Lab', path: '/admin/forecasting', icon: BarChart3 },
-    { label: 'User Directory', path: '/admin/users', icon: Users },
-    { label: 'All Properties', path: '/admin/properties', icon: Building2 },
-    { label: 'Municipal Zones', path: '/admin/zones', icon: MapPin },
-    { label: 'Tax Rate Config', path: '/admin/tax-rates', icon: Percent },
-    { label: 'Tax Assessments', path: '/admin/assessments', icon: Receipt },
-    { label: 'Treasury & Payments', path: '/admin/payments', icon: CreditCard },
-    { label: 'Grievances Oversight', path: '/admin/grievances', icon: AlertTriangle },
-    { label: 'Revenue Analytics', path: '/admin/analytics', icon: BarChart3 },
-    { label: 'Audit Reports', path: '/admin/reports', icon: FileSpreadsheet },
-    { label: 'Salesforce Gateway', path: '/admin/salesforce', icon: ShieldCheck },
-    { label: 'Academic Evidence', path: '/admin/evidence', icon: ShieldCheck },
-    { label: 'Audit Trail Ledger', path: '/admin/audit', icon: ShieldCheck },
-    { label: 'System Settings', path: '/admin/settings', icon: Settings },
+    { label: 'Admin Dashboard', path: '/admin', icon: LayoutDashboard, section: 'Executive' },
+    { label: 'Command Center', path: '/admin/command-center', icon: BarChart3, section: 'Executive' },
+    { label: 'Municipal GIS Map', path: '/admin/gis', icon: MapPin, section: 'Spatial & Recovery' },
+    { label: 'Revenue Recovery', path: '/admin/recovery', icon: AlertTriangle, section: 'Spatial & Recovery' },
+    { label: 'Risk & Compliance', path: '/admin/compliance', icon: ShieldCheck, section: 'Spatial & Recovery' },
+    { label: 'Revenue Forecast Lab', path: '/admin/forecasting', icon: BarChart3, section: 'Spatial & Recovery' },
+    { label: 'User Directory', path: '/admin/users', icon: Users, section: 'Administration' },
+    { label: 'All Properties', path: '/admin/properties', icon: Building2, section: 'Administration' },
+    { label: 'Municipal Zones', path: '/admin/zones', icon: MapPin, section: 'Administration' },
+    { label: 'Tax Rate Config', path: '/admin/tax-rates', icon: Percent, section: 'Administration' },
+    { label: 'Tax Assessments', path: '/admin/assessments', icon: Receipt, section: 'Financial Operations' },
+    { label: 'Treasury & Payments', path: '/admin/payments', icon: CreditCard, section: 'Financial Operations' },
+    { label: 'Grievances Oversight', path: '/admin/grievances', icon: AlertTriangle, section: 'Financial Operations' },
+    { label: 'Revenue Analytics', path: '/admin/analytics', icon: BarChart3, section: 'Reports & Logs' },
+    { label: 'Audit Reports', path: '/admin/reports', icon: FileSpreadsheet, section: 'Reports & Logs' },
+    { label: 'Salesforce Gateway', path: '/admin/salesforce', icon: ShieldCheck, section: 'Enterprise Connect' },
+    { label: 'Academic Evidence', path: '/admin/evidence', icon: Sparkles, section: 'Enterprise Connect' },
+    { label: 'Audit Trail Ledger', path: '/admin/audit', icon: ShieldCheck, section: 'Enterprise Connect' },
+    { label: 'System Settings', path: '/admin/settings', icon: Settings, section: 'System' },
   ];
 
   const navItems = role === 'ADMIN' ? adminNav : role === 'OFFICER' ? officerNav : citizenNav;
 
   const sidebarContent = (
-    <div className="h-full flex flex-col justify-between bg-[#101D32] text-slate-200 select-none border-r border-[#19283D] shadow-xl">
+    <div className="h-full flex flex-col justify-between bg-white dark:bg-[#0C1424] text-slate-700 dark:text-slate-200 select-none border-r border-[#E2E8F0] dark:border-[#26354B] shadow-sm transition-colors duration-200">
       {/* Brand & Logo */}
-      <div>
-        <div className="h-16 flex items-center justify-between px-4 border-b border-[#19283D]">
+      <div className="flex-1 overflow-y-auto">
+        <div className="h-16 flex items-center justify-between px-4 border-b border-[#E2E8F0] dark:border-[#26354B]">
           <div className="flex items-center gap-3 overflow-hidden">
-            <div className="w-9 h-9 rounded-xl bg-[#405CF5] text-white flex items-center justify-center font-extrabold text-base shadow-md flex-shrink-0">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-[#2563EB] to-[#14B8A6] text-white flex items-center justify-center font-extrabold text-sm shadow-md flex-shrink-0">
               CT
             </div>
             {!isCollapsed && (
               <div className="flex flex-col">
-                <span className="font-extrabold text-white text-base tracking-tight leading-none">
+                <span className="font-extrabold text-[#172033] dark:text-[#F8FAFC] text-base tracking-tight leading-none">
                   CIVICTAX
                 </span>
-                <span className="text-[10px] text-[#13A58B] font-semibold tracking-wider uppercase mt-1">
-                  Municipal Portal
+                <span className="text-[10px] text-[#0D9488] dark:text-[#14B8A6] font-semibold tracking-wider uppercase mt-1">
+                  Smart Governance
                 </span>
               </div>
             )}
           </div>
           <button
             onClick={onToggleCollapse}
-            className="hidden md:flex p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-[#19283D] transition cursor-pointer"
+            className="hidden md:flex p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#17243A] transition cursor-pointer"
             aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           >
             {isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
@@ -140,14 +141,14 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
 
         {/* User Role Tag */}
         {!isCollapsed && (
-          <div className="px-4 py-3 bg-[#19283D]/60 border-b border-[#19283D]">
-            <div className="flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-[#13A58B] flex-shrink-0" />
+          <div className="px-4 py-3 bg-slate-50/80 dark:bg-[#111C2E] border-b border-[#E2E8F0] dark:border-[#26354B]">
+            <div className="flex items-center gap-2.5">
+              <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
               <div className="text-xs truncate">
-                <span className="font-bold text-white uppercase text-[11px] tracking-wider">
+                <span className="font-bold text-[#172033] dark:text-white uppercase text-[10px] tracking-wider">
                   {role} PORTAL
                 </span>
-                <p className="text-[10px] text-slate-400 truncate">
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate font-medium">
                   {currentUser?.name}
                 </p>
               </div>
@@ -156,7 +157,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
         )}
 
         {/* Navigation Links */}
-        <nav className="p-2 space-y-1 mt-2">
+        <nav className="p-2 space-y-0.5 mt-2">
           {navItems.map((item) => (
             <NavLink
               key={item.path}
@@ -164,10 +165,10 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
               end={item.path === '/citizen' || item.path === '/officer' || item.path === '/admin'}
               onClick={onCloseMobile}
               className={({ isActive }) =>
-                `group relative flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium text-xs transition-all duration-150 ${
+                `group relative flex items-center gap-3 px-3 py-2 rounded-xl font-medium text-xs transition-all duration-150 ${
                   isActive
-                    ? 'bg-[#405CF5] text-white shadow-md shadow-indigo-500/20 font-semibold'
-                    : 'text-slate-400 hover:text-slate-100 hover:bg-[#19283D]'
+                    ? 'bg-[#2563EB] text-white shadow-sm font-semibold'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100/80 dark:hover:bg-[#17243A]'
                 }`
               }
               title={isCollapsed ? item.label : undefined}
@@ -185,10 +186,10 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
       </div>
 
       {/* Footer / Logout */}
-      <div className="p-3 border-t border-[#19283D]">
+      <div className="p-3 border-t border-[#E2E8F0] dark:border-[#26354B]">
         <button
           onClick={handleLogout}
-          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium text-xs text-rose-400 hover:text-white hover:bg-rose-600/20 transition-colors cursor-pointer"
+          className="w-full flex items-center gap-3 px-3 py-2 rounded-xl font-medium text-xs text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer"
           title={isCollapsed ? 'Sign Out' : undefined}
         >
           <LogOut className="w-4 h-4 flex-shrink-0" />

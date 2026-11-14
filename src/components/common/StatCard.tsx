@@ -28,10 +28,10 @@ export const StatCard: React.FC<StatCardProps> = ({
 }) => {
   const colorMap = {
     indigo: {
-      bg: 'bg-indigo-50 dark:bg-indigo-950/40',
-      text: 'text-[#405CF5] dark:text-indigo-400',
-      border: 'border-indigo-100 dark:border-indigo-900/40',
-      hoverGlow: 'hover:border-[#405CF5]/40',
+      bg: 'bg-blue-50 dark:bg-blue-950/40',
+      text: 'text-[#2563EB] dark:text-blue-400',
+      border: 'border-blue-100 dark:border-blue-900/40',
+      hoverGlow: 'hover:border-[#2563EB]/40',
     },
     blue: {
       bg: 'bg-blue-50 dark:bg-blue-950/40',
@@ -41,7 +41,7 @@ export const StatCard: React.FC<StatCardProps> = ({
     },
     teal: {
       bg: 'bg-teal-50 dark:bg-teal-950/40',
-      text: 'text-[#13A58B] dark:text-teal-400',
+      text: 'text-[#0D9488] dark:text-[#14B8A6]',
       border: 'border-teal-100 dark:border-teal-900/50',
       hoverGlow: 'hover:border-teal-400/40',
     },
@@ -64,9 +64,9 @@ export const StatCard: React.FC<StatCardProps> = ({
       hoverGlow: 'hover:border-rose-400/40',
     },
     navy: {
-      bg: 'bg-slate-100 dark:bg-slate-800',
+      bg: 'bg-slate-100 dark:bg-[#17243A]',
       text: 'text-slate-800 dark:text-slate-200',
-      border: 'border-slate-200 dark:border-slate-700',
+      border: 'border-slate-200 dark:border-[#26354B]',
       hoverGlow: 'hover:border-slate-400/40',
     },
   };
@@ -75,40 +75,40 @@ export const StatCard: React.FC<StatCardProps> = ({
 
   return (
     <motion.div
-      whileHover={{ y: -3, transition: { duration: 0.2 } }}
+      whileHover={{ y: -2, transition: { duration: 0.15 } }}
       onClick={onClick}
-      className={`relative p-5 rounded-3xl bg-white dark:bg-[#101D32] border border-slate-200/90 dark:border-slate-800 shadow-sm hover:shadow-card transition-all ${
+      className={`relative p-5 rounded-2xl bg-white dark:bg-[#111C2E] border border-[#E2E8F0] dark:border-[#26354B] shadow-sm hover:shadow-card transition-all ${
         selectedColor.hoverGlow
       } ${onClick ? 'cursor-pointer' : ''}`}
     >
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex items-start justify-between gap-3">
         <div className="space-y-1.5 flex-1 min-w-0">
           <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 truncate tracking-wide">
             {title}
           </p>
           {isLoading ? (
-            <div className="h-8 w-24 bg-slate-200 dark:bg-slate-800 animate-pulse rounded-lg" />
+            <div className="h-8 w-24 bg-slate-200 dark:bg-[#17243A] animate-pulse rounded-lg" />
           ) : (
-            <h3 className="text-2xl font-extrabold text-[#101D32] dark:text-white tracking-tight truncate">
+            <h3 className="text-2xl font-extrabold text-[#172033] dark:text-[#F8FAFC] tracking-tight truncate">
               {value}
             </h3>
           )}
           {subtitle && (
-            <p className="text-[11px] text-slate-400 dark:text-slate-400 truncate">
+            <p className="text-[11px] text-slate-400 dark:text-slate-400 truncate font-medium">
               {subtitle}
             </p>
           )}
         </div>
 
         <div
-          className={`w-12 h-12 rounded-2xl flex items-center justify-center font-bold flex-shrink-0 ${selectedColor.bg} ${selectedColor.text} border ${selectedColor.border}`}
+          className={`w-11 h-11 rounded-xl flex items-center justify-center font-bold flex-shrink-0 ${selectedColor.bg} ${selectedColor.text} border ${selectedColor.border}`}
         >
           <Icon className="w-5 h-5" />
         </div>
       </div>
 
       {trend && (
-        <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800/80 flex items-center gap-1.5 text-xs font-semibold">
+        <div className="mt-3 pt-3 border-t border-slate-100 dark:border-[#26354B]/80 flex items-center gap-1.5 text-xs font-semibold">
           <span
             className={
               trend.isPositive
