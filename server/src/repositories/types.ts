@@ -58,3 +58,26 @@ export interface IGrievance {
   resolutionDate?: string;
   createdAt: string;
 }
+
+export interface IReassessment {
+  id: string;
+  requestNumber: string;
+  propertyId: string;
+  originalAssessmentId?: string;
+  requestedChange: string;
+  supportingReason: string;
+  approvalStatus: 'SUBMITTED' | 'UNDER_REVIEW' | 'RECOMMENDED' | 'APPROVED' | 'REJECTED';
+  decisionComments?: string;
+  createdAt: string;
+}
+
+export interface IDashboardMetrics {
+  totalProperties: number;
+  verifiedProperties: number;
+  pendingVerifications: number;
+  totalTaxAssessed: number;
+  totalRevenueCollected: number;
+  totalOutstandingDues: number;
+  collectionEfficiencyRate: number;
+  openGrievances: number;
+}

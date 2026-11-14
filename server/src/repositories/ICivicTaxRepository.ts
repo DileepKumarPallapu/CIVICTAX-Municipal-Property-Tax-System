@@ -1,5 +1,5 @@
 // server/src/repositories/ICivicTaxRepository.ts
-import { IProperty, ITaxAssessment, ITaxPayment, IGrievance } from './types.js';
+import { IProperty, ITaxAssessment, ITaxPayment, IGrievance, IReassessment, IDashboardMetrics } from './types.js';
 
 export interface ICivicTaxRepository {
   // Properties
@@ -21,4 +21,11 @@ export interface ICivicTaxRepository {
   listGrievances(citizenId?: string): Promise<IGrievance[]>;
   createGrievance(grievance: Omit<IGrievance, 'id' | 'grievanceNumber' | 'createdAt'>): Promise<IGrievance>;
   resolveGrievance(id: string, comments: string): Promise<IGrievance>;
+
+  // Reassessments
+  listReassessments(propertyId?: string): Promise<IReassessment[]>;
+  createReassessment(reassessment: Omit<IReassessment, 'id' | 'requestNumber' | 'createdAt'>): Promise<IReassessment>;
+
+  // Dashboard Metrics
+  getDashboardMetrics(): Promise<IDashboardMetrics>;
 }

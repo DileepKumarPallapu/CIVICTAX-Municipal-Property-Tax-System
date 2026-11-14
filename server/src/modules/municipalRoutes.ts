@@ -1,21 +1,37 @@
 // server/src/modules/municipalRoutes.ts
 import { Router, Request, Response } from 'express';
 import { BackendServiceFactory } from '../repositories/ServiceFactory.js';
+import { config } from '../config/index.js';
 
 export const municipalApiRouter = Router();
 const repo = BackendServiceFactory.getRepository();
 
+// 1. HEALTH & SYSTEM STATUS
 // GET /api/health
 municipalApiRouter.get('/api/health', (req: Request, res: Response) => {
   res.json({
     status: 'HEALTHY',
-    service: 'CivicTax Municipal Backend Services',
+    service: 'CivicTax Municipal Backend Gateway',
     timestamp: new Date().toISOString(),
-    dataProvider: 'LocalRepository (Authoritative In-Memory/SQLite Schema)',
+    dataProvider: 'LocalRepository (Authoritative In-Memory Schema)',
   });
 });
 
-// PROPERTIES
+// GET /api/salesforce/health
+municipalApiRouter.get('/api/salesforce/health', (req: Request, res: Response) => {
+  const sfSession = req.session.salesforceSession;
+  res.json({
+    status: 'HEALTHY',
+    service: 'CivicTax Salesforce Gateway',
+    salesforceConnected: Boolean(sfSession && sfSession.accessToken),
+    apiVersion: config.salesforce.apiVersion,
+    loginUrl: config.salesforce.loginUrl,
+    orgId: sfSession ? sfSession.orgId : null,
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// 2. PROPERTIES
 // GET /api/properties
 municipalApiRouter.get('/api/properties', async (req: Request, res: Response) => {
   try {
@@ -41,7 +57,7 @@ municipalApiRouter.post('/api/properties', async (req: Request, res: Response) =
       return;
     }
 
-    if (builtUpArea <= 0) {
+    if (Number(builtUpArea) <= 0) {
       res.status(400).json({ success: false, error: 'Built-up area must be strictly greater than zero' });
       return;
     }
@@ -92,7 +108,7 @@ municipalApiRouter.patch('/api/properties/:id/verify', async (req: Request, res:
   }
 });
 
-// ASSESSMENTS
+// 3. ASSESSMENTS
 // GET /api/assessments
 municipalApiRouter.get('/api/assessments', async (req: Request, res: Response) => {
   try {
@@ -101,6 +117,46 @@ municipalApiRouter.get('/api/assessments', async (req: Request, res: Response) =
     res.json({ success: true, count: asms.length, data: asms });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/assessments
+municipalApiRouter.post('/api/assessments', async (req: Request, res: Response) => {
+  try {
+    const { propertyId, assessmentYear, category, builtUpArea, appliedRatePerSqFt } = req.body;
+
+    if (!propertyId || !assessmentYear || !builtUpArea) {
+      res.status(400).json({ success: false, error: 'Missing mandatory assessment parameters' });
+      return;
+    }
+
+    const rate = Number(appliedRatePerSqFt) || 10;
+    const area = Number(builtUpArea);
+    const baseTax = Math.round(area * rate * 100) / 100;
+    const discount = Math.round(baseTax * 0.05 * 100) / 100; // 5% prompt discount
+    const penalty = 0;
+    const totalTax = Math.round((baseTax - discount) * 100) / 100;
+
+    const asm = await repo.createAssessment({
+      assessmentNumber: `CT-ASM-${Date.now()}`,
+      propertyId,
+      assessmentYear,
+      category: category || 'RESIDENTIAL',
+      builtUpArea: area,
+      appliedRatePerSqFt: rate,
+      baseTax,
+      penalty,
+      discount,
+      totalTax,
+      amountPaid: 0,
+      outstandingBalance: totalTax,
+      status: 'APPROVED',
+      dueDate: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    });
+
+    res.status(201).json({ success: true, data: asm });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
   }
 });
 
@@ -118,7 +174,7 @@ municipalApiRouter.get('/api/assessments/:id', async (req: Request, res: Respons
   }
 });
 
-// PAYMENTS
+// 4. PAYMENTS
 // GET /api/payments
 municipalApiRouter.get('/api/payments', async (req: Request, res: Response) => {
   try {
@@ -155,11 +211,12 @@ municipalApiRouter.post('/api/payments', async (req: Request, res: Response) => 
   }
 });
 
-// GRIEVANCES
+// 5. GRIEVANCES
 // GET /api/grievances
 municipalApiRouter.get('/api/grievances', async (req: Request, res: Response) => {
   try {
-    const grievances = await repo.listGrievances();
+    const { citizenId } = req.query;
+    const grievances = await repo.listGrievances(citizenId as string);
     res.json({ success: true, count: grievances.length, data: grievances });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -187,5 +244,51 @@ municipalApiRouter.post('/api/grievances', async (req: Request, res: Response) =
     res.status(201).json({ success: true, data: grv });
   } catch (err: any) {
     res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+// 6. REASSESSMENTS
+// GET /api/reassessments
+municipalApiRouter.get('/api/reassessments', async (req: Request, res: Response) => {
+  try {
+    const { propertyId } = req.query;
+    const items = await repo.listReassessments(propertyId as string);
+    res.json({ success: true, count: items.length, data: items });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/reassessments
+municipalApiRouter.post('/api/reassessments', async (req: Request, res: Response) => {
+  try {
+    const { propertyId, originalAssessmentId, requestedChange, supportingReason } = req.body;
+    if (!propertyId || !requestedChange) {
+      res.status(400).json({ success: false, error: 'Property ID and requested changes are mandatory' });
+      return;
+    }
+
+    const item = await repo.createReassessment({
+      propertyId,
+      originalAssessmentId,
+      requestedChange,
+      supportingReason: supportingReason || 'Municipal survey revision',
+      approvalStatus: 'SUBMITTED',
+    });
+
+    res.status(201).json({ success: true, data: item });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+// 7. DASHBOARD
+// GET /api/dashboard
+municipalApiRouter.get('/api/dashboard', async (req: Request, res: Response) => {
+  try {
+    const metrics = await repo.getDashboardMetrics();
+    res.json({ success: true, data: metrics });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Owner__c</fullName>
+    <deleteConstraint>SetNull</deleteConstraint>
+    <description>Citizen Contact owning the property</description>
+    <externalId>false</externalId>
+    <label>Citizen Owner</label>
+    <referenceTo>Contact</referenceTo>
+    <relationshipLabel>Properties Owned</relationshipLabel>
+    <relationshipName>Properties_Owned</relationshipName>
+    <required>false</required>
+    <trackHistory>true</trackHistory>
+    <type>Lookup</type>
+</CustomField>

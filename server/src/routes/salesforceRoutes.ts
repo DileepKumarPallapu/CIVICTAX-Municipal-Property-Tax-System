@@ -1,10 +1,10 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { SalesforceClient } from '../services/salesforceClient.js';
 
 export const salesforceApiRouter = Router();
 
-// Middleware: Require active Salesforce session
-salesforceApiRouter.use((req: Request, res: Response, next) => {
+// Middleware: Require active Salesforce session for proxy and verification calls
+const requireSalesforceSession = (req: Request, res: Response, next: NextFunction) => {
   const sfSession = req.session.salesforceSession;
   if (!sfSession || !sfSession.accessToken) {
     res.status(401).json({
@@ -14,10 +14,10 @@ salesforceApiRouter.use((req: Request, res: Response, next) => {
     return;
   }
   next();
-});
+};
 
 // GET /api/salesforce/verify - Live Connectivity Test
-salesforceApiRouter.get('/api/salesforce/verify', async (req: Request, res: Response) => {
+salesforceApiRouter.get('/api/salesforce/verify', requireSalesforceSession, async (req: Request, res: Response) => {
   try {
     const session = req.session.salesforceSession!;
     const identity = await SalesforceClient.fetchIdentity(session.identityUrl, session.accessToken);
@@ -42,7 +42,7 @@ salesforceApiRouter.get('/api/salesforce/verify', async (req: Request, res: Resp
 });
 
 // Generic Apex REST Proxy: GET /api/salesforce/proxy/*
-salesforceApiRouter.all('/api/salesforce/proxy/*', async (req: Request, res: Response) => {
+salesforceApiRouter.all('/api/salesforce/proxy/*', requireSalesforceSession, async (req: Request, res: Response) => {
   try {
     const session = req.session.salesforceSession!;
     const endpointPath = req.params[0] || '';

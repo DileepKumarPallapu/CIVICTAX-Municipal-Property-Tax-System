@@ -1,6 +1,6 @@
 // server/src/repositories/LocalRepository.ts
 import { ICivicTaxRepository } from './ICivicTaxRepository.js';
-import { IProperty, ITaxAssessment, ITaxPayment, IGrievance } from './types.js';
+import { IProperty, ITaxAssessment, ITaxPayment, IGrievance, IReassessment, IDashboardMetrics } from './types.js';
 
 export class LocalRepository implements ICivicTaxRepository {
   private properties: IProperty[] = [
@@ -98,6 +98,19 @@ export class LocalRepository implements ICivicTaxRepository {
       description: 'The property is partly residential and was assessed as purely commercial.',
       priority: 'MEDIUM',
       status: 'OPEN',
+      createdAt: new Date().toISOString(),
+    },
+  ];
+
+  private reassessments: IReassessment[] = [
+    {
+      id: 'rr-001',
+      requestNumber: 'RR-2026-0001',
+      propertyId: 'prop-001',
+      originalAssessmentId: 'asm-001',
+      requestedChange: 'Built-up area reassessment following third-floor balcony enclosure.',
+      supportingReason: 'Municipal building plan amendment approval #BP-2025-9982',
+      approvalStatus: 'SUBMITTED',
       createdAt: new Date().toISOString(),
     },
   ];
@@ -215,5 +228,56 @@ export class LocalRepository implements ICivicTaxRepository {
     grv.resolutionComments = comments;
     grv.resolutionDate = new Date().toISOString();
     return grv;
+  }
+
+  public async listReassessments(propertyId?: string): Promise<IReassessment[]> {
+    if (propertyId) {
+      return this.reassessments.filter((r) => r.propertyId === propertyId);
+    }
+    return this.reassessments;
+  }
+
+  public async createReassessment(reassessment: Omit<IReassessment, 'id' | 'requestNumber' | 'createdAt'>): Promise<IReassessment> {
+    const newReassessment: IReassessment = {
+      ...reassessment,
+      id: `rr-${Date.now()}`,
+      requestNumber: `RR-${Date.now()}`,
+      createdAt: new Date().toISOString(),
+    };
+    this.reassessments.push(newReassessment);
+    return newReassessment;
+  }
+
+  public async getDashboardMetrics(): Promise<IDashboardMetrics> {
+    const totalProperties = this.properties.length;
+    const verifiedProperties = this.properties.filter((p) => p.verificationStatus === 'VERIFIED').length;
+    const pendingVerifications = this.properties.filter((p) => p.verificationStatus === 'PENDING').length;
+    
+    let totalTaxAssessed = 0;
+    let totalRevenueCollected = 0;
+    let totalOutstandingDues = 0;
+
+    for (const a of this.assessments) {
+      totalTaxAssessed += a.totalTax;
+      totalRevenueCollected += a.amountPaid;
+      totalOutstandingDues += a.outstandingBalance;
+    }
+
+    const collectionEfficiencyRate = totalTaxAssessed > 0 
+      ? Math.round((totalRevenueCollected / totalTaxAssessed) * 10000) / 100
+      : 0;
+
+    const openGrievances = this.grievances.filter((g) => g.status === 'OPEN').length;
+
+    return {
+      totalProperties,
+      verifiedProperties,
+      pendingVerifications,
+      totalTaxAssessed,
+      totalRevenueCollected,
+      totalOutstandingDues,
+      collectionEfficiencyRate,
+      openGrievances,
+    };
   }
 }
