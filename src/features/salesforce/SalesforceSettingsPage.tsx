@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { SalesforceApiClient } from '../../services/salesforceApiClient';
+import { SalesforceApiClient, BACKEND_BASE } from '../../services/salesforceApiClient';
 import { ShieldCheck, Cloud, RefreshCw, Power, AlertTriangle, ExternalLink, Database, Key } from 'lucide-react';
 
 export const SalesforceSettingsPage: React.FC = () => {
@@ -36,7 +36,7 @@ export const SalesforceSettingsPage: React.FC = () => {
 
   const handleConnect = () => {
     // Initiate OAuth 2.0 PKCE flow on Express server
-    window.location.href = 'http://localhost:3001/auth/salesforce';
+    window.location.href = `${BACKEND_BASE}/auth/salesforce`;
   };
 
   const handleVerify = async () => {
@@ -228,7 +228,7 @@ export const SalesforceSettingsPage: React.FC = () => {
             <div className="text-xs font-semibold text-slate-700 mb-1">External Client App Setup:</div>
             <p className="text-[11px] text-slate-500 leading-relaxed">
               Callback URI must be set to: <br />
-              <code className="text-indigo-600 font-mono">http://localhost:3001/auth/salesforce/callback</code>
+              <code className="text-indigo-600 font-mono">{BACKEND_BASE}/auth/salesforce/callback</code>
             </p>
           </div>
         </div>

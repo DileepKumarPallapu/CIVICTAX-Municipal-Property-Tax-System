@@ -6,6 +6,7 @@ export interface ServerConfig {
   nodeEnv: string;
   frontendUrl: string;
   sessionSecret: string;
+  redisUrl?: string;
   salesforce: {
     loginUrl: string;
     clientId: string;
@@ -25,12 +26,14 @@ export function loadConfig(): ServerConfig {
   const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
   const port = parseInt(process.env.PORT || '3001', 10);
   const nodeEnv = process.env.NODE_ENV || 'development';
+  const redisUrl = process.env.REDIS_URL || process.env.KV_URL || undefined;
 
   return {
     port,
     nodeEnv,
     frontendUrl,
     sessionSecret,
+    redisUrl,
     salesforce: {
       loginUrl,
       clientId,

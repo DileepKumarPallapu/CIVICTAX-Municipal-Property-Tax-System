@@ -1,5 +1,8 @@
-// CivicTax 8.0 Express Backend API Client
-const BACKEND_BASE = 'http://localhost:3001';
+// CivicTax Backend API Client with environment-aware baseURL
+export const BACKEND_BASE =
+  (import.meta.env.VITE_API_BASE_URL as string) ||
+  (import.meta.env.VITE_BACKEND_URL as string) ||
+  'http://localhost:3001';
 
 export class SalesforceApiClient {
   // Check live connection status of Salesforce integration
@@ -41,9 +44,16 @@ export class SalesforceApiClient {
   // Call Apex REST Endpoint via secure server proxy
   public static async callApexRest(endpoint: string, method: 'GET' | 'POST' | 'PATCH' = 'GET', body?: any) {
     const cleanEndpoint = endpoint.startsWith('/') ? endpoint.slice(1) : endpoint;
+    const headers: Record<string, string> = {
+      'x-civictax-csrf': '1',
+    };
+    if (body) {
+      headers['Content-Type'] = 'application/json';
+    }
+
     const res = await fetch(`${BACKEND_BASE}/api/salesforce/proxy/${cleanEndpoint}`, {
       method,
-      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      headers,
       credentials: 'include',
       body: body ? JSON.stringify(body) : undefined,
     });

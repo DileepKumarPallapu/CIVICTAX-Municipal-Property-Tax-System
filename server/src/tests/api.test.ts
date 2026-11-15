@@ -253,5 +253,105 @@ describe('CivicTax Server Repository & Business Rules Test Suite', () => {
       expect(statusCode).toBe(401);
       expect(jsonResponse.error).toBe('UNAUTHENTICATED');
     });
+
+    it('verifies session lifecycle and persistence across independent requests', async () => {
+      const { authRouter } = await import('../routes/authRoutes.js');
+
+      // Request 1: Login
+      const sessionStore: Record<string, any> = {};
+      const loginReq: any = {
+        body: { email: 'officer@civictax.demo', password: 'Officer@123' },
+        session: sessionStore,
+      };
+      let loginCode = 200;
+      let loginData: any = null;
+      const loginRes: any = {
+        status: (code: number) => {
+          loginCode = code;
+          return loginRes;
+        },
+        json: (data: any) => {
+          loginData = data;
+        },
+      };
+
+      const loginLayer = authRouter.stack.find(
+        (l: any) => l.route && l.route.path === '/api/auth/login' && l.route.methods.post
+      );
+      loginLayer.route.stack[0].handle(loginReq, loginRes);
+      expect(loginCode).toBe(200);
+      expect(loginData.success).toBe(true);
+      expect(sessionStore.civicTaxUser).toBeTruthy();
+      expect(sessionStore.civicTaxUser.role).toBe('OFFICER');
+
+      // Request 2: Independent request presenting the persisted session
+      const meReq: any = {
+        session: sessionStore,
+      };
+      let meCode = 200;
+      let meData: any = null;
+      const meRes: any = {
+        status: (code: number) => {
+          meCode = code;
+          return meRes;
+        },
+        json: (data: any) => {
+          meData = data;
+        },
+      };
+
+      const meLayer = authRouter.stack.find(
+        (l: any) => l.route && l.route.path === '/api/auth/me' && l.route.methods.get
+      );
+      meLayer.route.stack[0].handle(meReq, meRes);
+      expect(meCode).toBe(200);
+      expect(meData.authenticated).toBe(true);
+      expect(meData.user.email).toBe('officer@civictax.demo');
+
+      // Request 3: Logout
+      const logoutReq: any = {
+        session: sessionStore,
+      };
+      let logoutCode = 200;
+      let logoutData: any = null;
+      const logoutRes: any = {
+        status: (code: number) => {
+          logoutCode = code;
+          return logoutRes;
+        },
+        json: (data: any) => {
+          logoutData = data;
+        },
+      };
+
+      const logoutLayer = authRouter.stack.find(
+        (l: any) => l.route && l.route.path === '/api/auth/logout' && l.route.methods.post
+      );
+      logoutLayer.route.stack[0].handle(logoutReq, logoutRes);
+      expect(logoutCode).toBe(200);
+      expect(logoutData.success).toBe(true);
+      expect(sessionStore.civicTaxUser).toBeUndefined();
+
+      // Request 4: Subsequent request after logout is rejected
+      let postLogoutCode = 200;
+      let postLogoutData: any = null;
+      const postLogoutRes: any = {
+        status: (code: number) => {
+          postLogoutCode = code;
+          return postLogoutRes;
+        },
+        json: (data: any) => {
+          postLogoutData = data;
+        },
+      };
+      meLayer.route.stack[0].handle({ session: sessionStore }, postLogoutRes);
+      expect(postLogoutCode).toBe(401);
+      expect(postLogoutData.authenticated).toBe(false);
+    });
+
+    it('verifies app trust proxy and Vercel serverless gateway setup', async () => {
+      const { app } = await import('../app.js');
+      expect(app.get('trust proxy')).toBe(1);
+    });
   });
 });
