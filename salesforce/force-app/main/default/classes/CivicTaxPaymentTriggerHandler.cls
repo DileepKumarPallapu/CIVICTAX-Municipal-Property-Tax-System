@@ -189,45 +189,55 @@ public with sharing class CivicTaxPaymentTriggerHandler {
         if (assessmentIds == null || assessmentIds.isEmpty()) {
             return;
         }
+        new SystemElevatedRollup().executeRollup(assessmentIds);
+    }
 
-        Map<Id, Decimal> paidMap = new Map<Id, Decimal>();
-        for (AggregateResult ar : [
-            SELECT Assessment__c asmId, SUM(Amount_Paid__c) totalPaid 
-            FROM Tax_Payment__c 
-            WHERE Assessment__c IN :assessmentIds 
-              AND (Transaction_Status__c = 'Success' OR Payment_Status__c = 'SUCCESS' OR Payment_Status__c = 'Success')
-            GROUP BY Assessment__c
-        ]) {
-            paidMap.put((Id) ar.get('asmId'), (Decimal) ar.get('totalPaid'));
-        }
-
-        List<Tax_Assessment__c> asmsToUpdate = new List<Tax_Assessment__c>();
-        for (Tax_Assessment__c asm : [
-            SELECT Id, Total_Amount__c, Amount_Paid__c, Outstanding_Amount__c, Assessment_Status__c 
-            FROM Tax_Assessment__c 
-            WHERE Id IN :assessmentIds
-        ]) {
-            Decimal totalPaid = paidMap.containsKey(asm.Id) ? paidMap.get(asm.Id) : 0.0;
-            Decimal totalDemand = asm.Total_Amount__c != null ? asm.Total_Amount__c : 0.0;
-            Decimal outstanding = totalDemand - totalPaid;
-            if (outstanding < 0) {
-                outstanding = 0.0;
+    /**
+     * @description System-level elevated context for statutory assessment balance recalculations.
+     * Assessment balance rollups must succeed atomically for any recorded payment transaction
+     * regardless of individual record ownership partitions.
+     */
+    private without sharing class SystemElevatedRollup {
+        public void executeRollup(Set<Id> assessmentIds) {
+            Map<Id, Decimal> paidMap = new Map<Id, Decimal>();
+            for (AggregateResult ar : [
+                SELECT Assessment__c asmId, SUM(Amount_Paid__c) totalPaid 
+                FROM Tax_Payment__c 
+                WHERE Assessment__c IN :assessmentIds 
+                  AND (Transaction_Status__c = 'Success' OR Payment_Status__c = 'SUCCESS' OR Payment_Status__c = 'Success')
+                GROUP BY Assessment__c
+            ]) {
+                paidMap.put((Id) ar.get('asmId'), (Decimal) ar.get('totalPaid'));
             }
 
-            asm.Amount_Paid__c = totalPaid;
-            asm.Outstanding_Amount__c = outstanding;
-            if (outstanding <= 0 && totalPaid > 0) {
-                asm.Assessment_Status__c = 'PAID';
-            } else if (totalPaid > 0) {
-                asm.Assessment_Status__c = 'PARTIALLY_PAID';
-            } else {
-                asm.Assessment_Status__c = 'APPROVED';
-            }
-            asmsToUpdate.add(asm);
-        }
+            List<Tax_Assessment__c> asmsToUpdate = new List<Tax_Assessment__c>();
+            for (Tax_Assessment__c asm : [
+                SELECT Id, Total_Amount__c, Amount_Paid__c, Outstanding_Amount__c, Assessment_Status__c 
+                FROM Tax_Assessment__c 
+                WHERE Id IN :assessmentIds
+            ]) {
+                Decimal totalPaid = paidMap.containsKey(asm.Id) ? paidMap.get(asm.Id) : 0.0;
+                Decimal totalDemand = asm.Total_Amount__c != null ? asm.Total_Amount__c : 0.0;
+                Decimal outstanding = totalDemand - totalPaid;
+                if (outstanding < 0) {
+                    outstanding = 0.0;
+                }
 
-        if (!asmsToUpdate.isEmpty()) {
-            update asmsToUpdate;
+                asm.Amount_Paid__c = totalPaid;
+                asm.Outstanding_Amount__c = outstanding;
+                if (outstanding <= 0 && totalPaid > 0) {
+                    asm.Assessment_Status__c = 'PAID';
+                } else if (totalPaid > 0) {
+                    asm.Assessment_Status__c = 'PARTIALLY_PAID';
+                } else {
+                    asm.Assessment_Status__c = 'APPROVED';
+                }
+                asmsToUpdate.add(asm);
+            }
+
+            if (!asmsToUpdate.isEmpty()) {
+                update asmsToUpdate;
+            }
         }
     }
 }

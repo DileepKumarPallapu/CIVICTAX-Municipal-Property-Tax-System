@@ -11,6 +11,8 @@ private class CivicTaxSecurityHardeningTest {
         User citizen2;
         User officer;
         User admin;
+        User vOfficer;
+        User gOfficer;
 
         System.runAs(new User(Id = UserInfo.getUserId())) {
             citizen1 = CivicTaxTestDataFactory.createTestUser('Citizen1', 'citizen1.sec@civictax.test', 'Standard User');
@@ -24,6 +26,12 @@ private class CivicTaxSecurityHardeningTest {
 
             admin = CivicTaxTestDataFactory.createTestUser('AdminUser', 'admin.sec@civictax.test', 'Standard User');
             CivicTaxTestDataFactory.assignPermissionSet(admin.Id, 'CivicTax_Admin');
+
+            vOfficer = CivicTaxTestDataFactory.createTestUser('VOfficer', 'vofficer.sec@civictax.test', 'Standard User');
+            CivicTaxTestDataFactory.assignPermissionSet(vOfficer.Id, 'CivicTax_Verification');
+
+            gOfficer = CivicTaxTestDataFactory.createTestUser('GOfficer', 'gofficer.sec@civictax.test', 'Standard User');
+            CivicTaxTestDataFactory.assignPermissionSet(gOfficer.Id, 'CivicTax_Grievance');
         }
 
         // Setup property owned by citizen1
@@ -74,6 +82,52 @@ private class CivicTaxSecurityHardeningTest {
             OwnerId = citizen1.Id
         );
         insert rr1;
+
+        // Setup distinct property owned by citizen2
+        Property__c prop2 = new Property__c(
+            Name = 'SEC-PROP-002',
+            Property_Number__c = 'SEC-PROP-002',
+            Property_Address__c = '200 Citizen Avenue',
+            Property_Category__c = 'COMMERCIAL',
+            Built_Up_Area__c = 800.0,
+            Zone__c = 'Zone 02',
+            Verification_Status__c = 'PENDING',
+            OwnerId = citizen2.Id
+        );
+        insert prop2;
+
+        Tax_Assessment__c asm2 = new Tax_Assessment__c(
+            Property__c = prop2.Id,
+            Assessment_Year__c = '2026-2027',
+            Base_Value__c = 8000.0,
+            Total_Amount__c = 8000.0,
+            Amount_Paid__c = 0.0,
+            Outstanding_Amount__c = 8000.0,
+            Due_Date__c = Date.today().addDays(30),
+            Assessment_Status__c = 'APPROVED',
+            OwnerId = citizen2.Id
+        );
+        insert asm2;
+
+        Grievance__c grv2 = new Grievance__c(
+            Property__c = prop2.Id,
+            Subject__c = 'Commercial Rate Classification',
+            Description__c = 'Commercial multiplier rate dispute',
+            Status__c = 'OPEN',
+            Priority__c = 'MEDIUM',
+            OwnerId = citizen2.Id
+        );
+        insert grv2;
+
+        Reassessment_Request__c rr2 = new Reassessment_Request__c(
+            Property__c = prop2.Id,
+            Original_Assessment__c = asm2.Id,
+            Requested_Change__c = 'Correct commercial square footage',
+            Supporting_Reason__c = 'Mezzanine excluded',
+            Approval_Status__c = 'Submitted',
+            OwnerId = citizen2.Id
+        );
+        insert rr2;
     }
 
     // 1. Citizen Cannot Verify Property via Apex REST (BOLA Protection)
@@ -134,7 +188,7 @@ private class CivicTaxSecurityHardeningTest {
                 PropertyService.updateVerificationStatus(prop.Id, 'VERIFIED', 'Unauthorized');
                 System.assert(false, 'Should throw SecurityException for citizen');
             } catch (Exception ex) {
-                System.assert(ex.getMessage().contains('restricted to Municipal Officers') || ex.getMessage().contains('Access Denied'));
+                System.assert(ex.getMessage().contains('restricted to Property Verification Officers') || ex.getMessage().contains('Access Denied'));
             }
             Test.stopTest();
         }
@@ -144,7 +198,7 @@ private class CivicTaxSecurityHardeningTest {
     @isTest
     static void testCitizenCannotResolveGrievance() {
         User citizen = [SELECT Id FROM User WHERE Email = 'citizen1.sec@civictax.test' LIMIT 1];
-        Grievance__c grv = [SELECT Id FROM Grievance__c LIMIT 1];
+        Grievance__c grv = [SELECT Id FROM Grievance__c WHERE Property__r.Property_Number__c = 'SEC-PROP-001' LIMIT 1];
 
         System.runAs(citizen) {
             Test.startTest();
@@ -152,7 +206,7 @@ private class CivicTaxSecurityHardeningTest {
                 CivicTaxGrievanceService.resolveGrievance(grv.Id, 'Self resolution by citizen');
                 System.assert(false, 'Citizen must not be allowed to resolve grievances');
             } catch (Exception ex) {
-                System.assert(ex.getMessage().contains('restricted to Municipal Officers') || ex.getMessage().contains('Access Denied'));
+                System.assert(ex.getMessage().contains('restricted to Grievance Redressal Officers') || ex.getMessage().contains('Access Denied'));
             }
             Test.stopTest();
         }
@@ -162,7 +216,7 @@ private class CivicTaxSecurityHardeningTest {
     @isTest
     static void testOfficerCanResolveGrievance() {
         User officer = [SELECT Id FROM User WHERE Email = 'officer.sec@civictax.test' LIMIT 1];
-        Grievance__c grv = [SELECT Id FROM Grievance__c LIMIT 1];
+        Grievance__c grv = [SELECT Id FROM Grievance__c WHERE Property__r.Property_Number__c = 'SEC-PROP-001' LIMIT 1];
 
         System.runAs(officer) {
             Test.startTest();
@@ -177,7 +231,7 @@ private class CivicTaxSecurityHardeningTest {
     @isTest
     static void testCitizenCannotApproveReassessment() {
         User citizen = [SELECT Id FROM User WHERE Email = 'citizen1.sec@civictax.test' LIMIT 1];
-        Reassessment_Request__c rr = [SELECT Id FROM Reassessment_Request__c LIMIT 1];
+        Reassessment_Request__c rr = [SELECT Id FROM Reassessment_Request__c WHERE Property__r.Property_Number__c = 'SEC-PROP-001' LIMIT 1];
 
         System.runAs(citizen) {
             Test.startTest();
@@ -185,7 +239,7 @@ private class CivicTaxSecurityHardeningTest {
                 CivicTaxReassessmentService.approveReassessment(rr.Id, 'Self approval');
                 System.assert(false, 'Citizen must not be allowed to approve reassessments');
             } catch (Exception ex) {
-                System.assert(ex.getMessage().contains('restricted to Municipal Officers') || ex.getMessage().contains('Access Denied'));
+                System.assert(ex.getMessage().contains('restricted to Valuation Reassessment Officers') || ex.getMessage().contains('Access Denied'));
             }
             Test.stopTest();
         }
@@ -195,7 +249,7 @@ private class CivicTaxSecurityHardeningTest {
     @isTest
     static void testOfficerCanApproveReassessment() {
         User officer = [SELECT Id FROM User WHERE Email = 'officer.sec@civictax.test' LIMIT 1];
-        Reassessment_Request__c rr = [SELECT Id FROM Reassessment_Request__c LIMIT 1];
+        Reassessment_Request__c rr = [SELECT Id FROM Reassessment_Request__c WHERE Property__r.Property_Number__c = 'SEC-PROP-001' LIMIT 1];
 
         System.runAs(officer) {
             Test.startTest();
@@ -209,7 +263,7 @@ private class CivicTaxSecurityHardeningTest {
     // 8. Prevent Direct Status Tampering to PAID Without Payment
     @isTest
     static void testPreventDirectPaidWithoutPayment() {
-        Tax_Assessment__c asm = [SELECT Id, Assessment_Status__c, Amount_Paid__c FROM Tax_Assessment__c LIMIT 1];
+        Tax_Assessment__c asm = [SELECT Id, Assessment_Status__c, Amount_Paid__c FROM Tax_Assessment__c WHERE Property__r.Property_Number__c = 'SEC-PROP-001' LIMIT 1];
         asm.Assessment_Status__c = 'DRAFT';
         update asm;
 
@@ -228,7 +282,7 @@ private class CivicTaxSecurityHardeningTest {
     // 9. Payment Immutability & Deletion Prevention
     @isTest
     static void testPaymentImmutabilityAndNoDelete() {
-        Tax_Assessment__c asm = [SELECT Id FROM Tax_Assessment__c LIMIT 1];
+        Tax_Assessment__c asm = [SELECT Id FROM Tax_Assessment__c WHERE Property__r.Property_Number__c = 'SEC-PROP-001' LIMIT 1];
 
         Test.startTest();
         Tax_Payment__c pmt = new Tax_Payment__c(
@@ -264,7 +318,7 @@ private class CivicTaxSecurityHardeningTest {
     // 10. Bulk Payment Trigger Rollup Recalculates Balances Atomically
     @isTest
     static void testBulkPaymentRollup() {
-        Tax_Assessment__c asm = [SELECT Id, Total_Amount__c, Amount_Paid__c, Outstanding_Amount__c FROM Tax_Assessment__c LIMIT 1];
+        Tax_Assessment__c asm = [SELECT Id, Total_Amount__c, Amount_Paid__c, Outstanding_Amount__c FROM Tax_Assessment__c WHERE Property__r.Property_Number__c = 'SEC-PROP-001' LIMIT 1];
 
         Test.startTest();
         List<Tax_Payment__c> payments = new List<Tax_Payment__c>();
@@ -356,7 +410,7 @@ private class CivicTaxSecurityHardeningTest {
     // 14. Security Service Helpers & CRUD Verification
     @isTest
     static void testSecurityServiceHelpers() {
-        Property__c prop = [SELECT Id FROM Property__c LIMIT 1];
+        Property__c prop = [SELECT Id FROM Property__c WHERE Property_Number__c = 'SEC-PROP-001' LIMIT 1];
         User citizen = [SELECT Id FROM User WHERE Email = 'citizen1.sec@civictax.test' LIMIT 1];
 
         Test.startTest();
@@ -369,7 +423,7 @@ private class CivicTaxSecurityHardeningTest {
 
         List<Property__c> sanitized = (List<Property__c>) CivicTaxSecurityService.sanitizeRecords(
             AccessType.READABLE, 
-            [SELECT Id, Name FROM Property__c LIMIT 1]
+            [SELECT Id, Name FROM Property__c WHERE Property_Number__c = 'SEC-PROP-001' LIMIT 1]
         );
         System.assertNotEquals(null, sanitized);
         System.assertEquals(null, CivicTaxSecurityService.sanitizeRecords(AccessType.READABLE, null));
@@ -440,7 +494,7 @@ private class CivicTaxSecurityHardeningTest {
     // 16. REST POST Resource Operations
     @isTest
     static void testRestPostEndpoints() {
-        Tax_Assessment__c asm = [SELECT Id FROM Tax_Assessment__c LIMIT 1];
+        Tax_Assessment__c asm = [SELECT Id FROM Tax_Assessment__c WHERE Property__r.Property_Number__c = 'SEC-PROP-001' LIMIT 1];
 
         Test.startTest();
         // POST properties
@@ -504,7 +558,7 @@ private class CivicTaxSecurityHardeningTest {
     static void testCitizenCannotFileReassessmentOnAnotherCitizensProperty() {
         User citizen2 = [SELECT Id FROM User WHERE Email = 'citizen2.sec@civictax.test' LIMIT 1];
         Property__c prop1 = [SELECT Id FROM Property__c WHERE Property_Number__c = 'SEC-PROP-001' LIMIT 1];
-        Tax_Assessment__c asm1 = [SELECT Id FROM Tax_Assessment__c LIMIT 1];
+        Tax_Assessment__c asm1 = [SELECT Id FROM Tax_Assessment__c WHERE Property__r.Property_Number__c = 'SEC-PROP-001' LIMIT 1];
 
         System.runAs(citizen2) {
             Test.startTest();
@@ -523,7 +577,7 @@ private class CivicTaxSecurityHardeningTest {
     static void testCitizenCanFileReassessmentOnOwnProperty() {
         User citizen1 = [SELECT Id FROM User WHERE Email = 'citizen1.sec@civictax.test' LIMIT 1];
         Property__c prop1 = [SELECT Id FROM Property__c WHERE Property_Number__c = 'SEC-PROP-001' LIMIT 1];
-        Tax_Assessment__c asm1 = [SELECT Id FROM Tax_Assessment__c LIMIT 1];
+        Tax_Assessment__c asm1 = [SELECT Id FROM Tax_Assessment__c WHERE Property__r.Property_Number__c = 'SEC-PROP-001' LIMIT 1];
 
         System.runAs(citizen1) {
             Test.startTest();
@@ -538,7 +592,7 @@ private class CivicTaxSecurityHardeningTest {
     // 21. Payment Financial Validation: Positive Amount Enforcement
     @isTest
     static void testPaymentAmountMustBePositive() {
-        Tax_Assessment__c asm = [SELECT Id FROM Tax_Assessment__c LIMIT 1];
+        Tax_Assessment__c asm = [SELECT Id FROM Tax_Assessment__c WHERE Property__r.Property_Number__c = 'SEC-PROP-001' LIMIT 1];
 
         Test.startTest();
         try {
@@ -560,7 +614,7 @@ private class CivicTaxSecurityHardeningTest {
     // 22. Payment Financial Validation: Cannot Exceed Outstanding Assessment Balance
     @isTest
     static void testPaymentCannotExceedOutstandingBalance() {
-        Tax_Assessment__c asm = [SELECT Id, Outstanding_Amount__c FROM Tax_Assessment__c LIMIT 1];
+        Tax_Assessment__c asm = [SELECT Id, Outstanding_Amount__c FROM Tax_Assessment__c WHERE Property__r.Property_Number__c = 'SEC-PROP-001' LIMIT 1];
 
         Test.startTest();
         try {
@@ -582,7 +636,7 @@ private class CivicTaxSecurityHardeningTest {
     // 23. Payment Security: Ownership Cannot Be Altered Once Created
     @isTest
     static void testPaymentOwnershipCannotBeModified() {
-        Tax_Assessment__c asm = [SELECT Id FROM Tax_Assessment__c LIMIT 1];
+        Tax_Assessment__c asm = [SELECT Id FROM Tax_Assessment__c WHERE Property__r.Property_Number__c = 'SEC-PROP-001' LIMIT 1];
         User citizen2 = [SELECT Id FROM User WHERE Email = 'citizen2.sec@civictax.test' LIMIT 1];
 
         Tax_Payment__c pmt = new Tax_Payment__c(
@@ -609,7 +663,7 @@ private class CivicTaxSecurityHardeningTest {
     @isTest
     static void testNonOfficerCannotManipulatePaymentStatusToSuccess() {
         User citizen = [SELECT Id FROM User WHERE Email = 'citizen1.sec@civictax.test' LIMIT 1];
-        Tax_Assessment__c asm = [SELECT Id FROM Tax_Assessment__c LIMIT 1];
+        Tax_Assessment__c asm = [SELECT Id FROM Tax_Assessment__c WHERE Property__r.Property_Number__c = 'SEC-PROP-001' LIMIT 1];
 
         Tax_Payment__c pmt = new Tax_Payment__c(
             Assessment__c = asm.Id,
@@ -640,7 +694,7 @@ private class CivicTaxSecurityHardeningTest {
     @isTest
     static void testCitizenCannotPayForAnotherCitizensAssessmentViaRest() {
         User citizen2 = [SELECT Id FROM User WHERE Email = 'citizen2.sec@civictax.test' LIMIT 1];
-        Tax_Assessment__c asm1 = [SELECT Id FROM Tax_Assessment__c LIMIT 1];
+        Tax_Assessment__c asm1 = [SELECT Id FROM Tax_Assessment__c WHERE Property__r.Property_Number__c = 'SEC-PROP-001' LIMIT 1];
 
         System.runAs(citizen2) {
             Test.startTest();
@@ -743,7 +797,7 @@ private class CivicTaxSecurityHardeningTest {
     // 30. Additional Coverage for CivicTaxPaymentService validations & listing
     @isTest
     static void testPaymentServiceCoverage() {
-        Tax_Assessment__c asm = [SELECT Id, Outstanding_Amount__c FROM Tax_Assessment__c LIMIT 1];
+        Tax_Assessment__c asm = [SELECT Id, Outstanding_Amount__c FROM Tax_Assessment__c WHERE Property__r.Property_Number__c = 'SEC-PROP-001' LIMIT 1];
 
         Test.startTest();
         // Null assessmentId
@@ -838,5 +892,225 @@ private class CivicTaxSecurityHardeningTest {
             System.assertEquals(403, res.statusCode);
             Test.stopTest();
         }
+    }
+
+    // 32. Payment Status Transition from Pending to Success Rolls Up Balance
+    @isTest
+    static void testPaymentStatusTransitionPendingToSuccessRollsUpBalance() {
+        Tax_Assessment__c asm = [
+            SELECT Id, Total_Amount__c, Amount_Paid__c, Outstanding_Amount__c, Assessment_Status__c 
+            FROM Tax_Assessment__c 
+            WHERE Property__r.Property_Number__c = 'SEC-PROP-001' 
+            LIMIT 1
+        ];
+        User admin = [SELECT Id FROM User WHERE Email = 'admin.sec@civictax.test' LIMIT 1];
+
+        Tax_Payment__c pmt = new Tax_Payment__c(
+            Assessment__c = asm.Id,
+            Amount_Paid__c = 5000.0,
+            Amount__c = 5000.0,
+            Payment_Method__c = 'UPI',
+            Transaction_ID__c = 'SEC-LIFECYCLE-TRANS-01',
+            Transaction_Status__c = 'Initiated',
+            Payment_Status__c = 'PENDING',
+            OwnerId = admin.Id
+        );
+        insert pmt;
+
+        // Prior to success transition, assessment balance remains unaffected
+        Tax_Assessment__c asmInitial = [
+            SELECT Amount_Paid__c, Outstanding_Amount__c, Assessment_Status__c 
+            FROM Tax_Assessment__c 
+            WHERE Id = :asm.Id
+        ];
+        System.assertEquals(0.0, asmInitial.Amount_Paid__c);
+        System.assertEquals(12000.0, asmInitial.Outstanding_Amount__c);
+
+        // Municipal Administrator transitions payment to Success
+        System.runAs(admin) {
+            Test.startTest();
+            pmt.Transaction_Status__c = 'Success';
+            pmt.Payment_Status__c = 'SUCCESS';
+            update pmt;
+            Test.stopTest();
+        }
+
+        // Verify assessment rollup automatically updated
+        Tax_Assessment__c asmUpdated = [
+            SELECT Amount_Paid__c, Outstanding_Amount__c, Assessment_Status__c 
+            FROM Tax_Assessment__c 
+            WHERE Id = :asm.Id
+        ];
+        System.assertEquals(5000.0, asmUpdated.Amount_Paid__c, 'Assessment Amount_Paid__c must roll up to 5000');
+        System.assertEquals(7000.0, asmUpdated.Outstanding_Amount__c, 'Outstanding balance must reduce to 7000');
+        System.assertEquals('PARTIALLY_PAID', asmUpdated.Assessment_Status__c, 'Assessment status must transition to PARTIALLY_PAID');
+    }
+
+    // 33. Reparenting Payment Recalculates Both Source and Target Assessments
+    @isTest
+    static void testPaymentAssessmentReparentingRollsUpBothAssessments() {
+        Tax_Assessment__c asm1 = [
+            SELECT Id, Total_Amount__c, Amount_Paid__c, Outstanding_Amount__c 
+            FROM Tax_Assessment__c 
+            WHERE Property__r.Property_Number__c = 'SEC-PROP-001' 
+            LIMIT 1
+        ];
+        Tax_Assessment__c asm2 = [
+            SELECT Id, Total_Amount__c, Amount_Paid__c, Outstanding_Amount__c 
+            FROM Tax_Assessment__c 
+            WHERE Property__r.Property_Number__c = 'SEC-PROP-002' 
+            LIMIT 1
+        ];
+        User admin = [SELECT Id FROM User WHERE Email = 'admin.sec@civictax.test' LIMIT 1];
+
+        // Insert pending payment on asm1
+        Tax_Payment__c pmt = new Tax_Payment__c(
+            Assessment__c = asm1.Id,
+            Amount_Paid__c = 3000.0,
+            Amount__c = 3000.0,
+            Payment_Method__c = 'CARD',
+            Transaction_ID__c = 'SEC-REPARENT-TXN-01',
+            Transaction_Status__c = 'Initiated',
+            Payment_Status__c = 'PENDING',
+            OwnerId = admin.Id
+        );
+        insert pmt;
+
+        // Admin reparents payment to asm2 and marks SUCCESS
+        System.runAs(admin) {
+            Test.startTest();
+            pmt.Assessment__c = asm2.Id;
+            pmt.Transaction_Status__c = 'Success';
+            pmt.Payment_Status__c = 'SUCCESS';
+            update pmt;
+            Test.stopTest();
+        }
+
+        // Verify asm1 has 0 paid, 12000 outstanding
+        Tax_Assessment__c updatedAsm1 = [
+            SELECT Amount_Paid__c, Outstanding_Amount__c, Assessment_Status__c 
+            FROM Tax_Assessment__c 
+            WHERE Id = :asm1.Id
+        ];
+        System.assertEquals(0.0, updatedAsm1.Amount_Paid__c);
+        System.assertEquals(12000.0, updatedAsm1.Outstanding_Amount__c);
+
+        // Verify asm2 has 3000 paid, 5000 outstanding, PARTIALLY_PAID
+        Tax_Assessment__c updatedAsm2 = [
+            SELECT Amount_Paid__c, Outstanding_Amount__c, Assessment_Status__c 
+            FROM Tax_Assessment__c 
+            WHERE Id = :asm2.Id
+        ];
+        System.assertEquals(3000.0, updatedAsm2.Amount_Paid__c);
+        System.assertEquals(5000.0, updatedAsm2.Outstanding_Amount__c);
+        System.assertEquals('PARTIALLY_PAID', updatedAsm2.Assessment_Status__c);
+    }
+
+    // 34. Specialist Permission Sets: Separate Grievance and Verification Capabilities
+    @isTest
+    static void testSpecialistPermissionSetSeparation() {
+        User vOfficer = [SELECT Id FROM User WHERE Email = 'vofficer.sec@civictax.test' LIMIT 1];
+        User gOfficer = [SELECT Id FROM User WHERE Email = 'gofficer.sec@civictax.test' LIMIT 1];
+        Property__c prop1 = [SELECT Id FROM Property__c WHERE Property_Number__c = 'SEC-PROP-001' LIMIT 1];
+        Property__c prop2 = [SELECT Id FROM Property__c WHERE Property_Number__c = 'SEC-PROP-002' LIMIT 1];
+        Grievance__c grv1 = [SELECT Id FROM Grievance__c WHERE Property__r.Property_Number__c = 'SEC-PROP-001' LIMIT 1];
+        Grievance__c grv2 = [SELECT Id FROM Grievance__c WHERE Property__r.Property_Number__c = 'SEC-PROP-002' LIMIT 1];
+
+        // 1. Verification specialist CAN verify property, but CANNOT resolve grievance
+        System.runAs(vOfficer) {
+            Test.startTest();
+            // Can verify
+            Property__c verifiedProp = PropertyService.updateVerificationStatus(prop1.Id, 'VERIFIED', 'Field survey passed');
+            System.assertEquals('VERIFIED', verifiedProp.Verification_Status__c);
+
+            // Cannot resolve grievance
+            try {
+                CivicTaxGrievanceService.resolveGrievance(grv1.Id, 'Unauthorized grievance attempt');
+                System.assert(false, 'Verification specialist must not be allowed to resolve grievances');
+            } catch (CivicTaxSecurityService.SecurityException se) {
+                System.assert(se.getMessage().contains('Grievance Redressal Officers'));
+            }
+            Test.stopTest();
+        }
+
+        // 2. Grievance specialist CAN resolve grievance, but CANNOT verify property
+        System.runAs(gOfficer) {
+            // Can resolve grievance
+            Grievance__c resolved = CivicTaxGrievanceService.resolveGrievance(grv2.Id, 'Resolution by grievance specialist');
+            System.assertEquals('RESOLVED', resolved.Status__c);
+
+            // Cannot verify property
+            try {
+                PropertyService.updateVerificationStatus(prop2.Id, 'VERIFIED', 'Unauthorized verification attempt');
+                System.assert(false, 'Grievance specialist must not be allowed to verify properties');
+            } catch (CivicTaxSecurityService.SecurityException se) {
+                System.assert(se.getMessage().contains('Property Verification Officers'));
+            }
+        }
+    }
+
+    // 35. Uncompleted Payment Deletion Safely Executes After-Delete Rollup
+    @isTest
+    static void testUncompletedPaymentDeletionRollup() {
+        Tax_Assessment__c asm = [
+            SELECT Id, Outstanding_Amount__c, Total_Amount__c 
+            FROM Tax_Assessment__c 
+            WHERE Property__r.Property_Number__c = 'SEC-PROP-001' 
+            LIMIT 1
+        ];
+
+        Tax_Payment__c pendingPmt = new Tax_Payment__c(
+            Assessment__c = asm.Id,
+            Amount_Paid__c = 2000.0,
+            Amount__c = 2000.0,
+            Payment_Method__c = 'NET_BANKING',
+            Transaction_ID__c = 'SEC-DEL-PENDING-01',
+            Transaction_Status__c = 'Initiated',
+            Payment_Status__c = 'PENDING'
+        );
+        insert pendingPmt;
+
+        Test.startTest();
+        delete pendingPmt;
+        Test.stopTest();
+
+        Tax_Assessment__c updatedAsm = [
+            SELECT Amount_Paid__c, Outstanding_Amount__c, Assessment_Status__c 
+            FROM Tax_Assessment__c 
+            WHERE Id = :asm.Id
+        ];
+        System.assertEquals(0.0, updatedAsm.Amount_Paid__c);
+        System.assertEquals(12000.0, updatedAsm.Outstanding_Amount__c);
+    }
+
+    // 36. Payment Trigger Handler Guard Clauses and Recursion Protection Coverage
+    @isTest
+    static void testPaymentTriggerHandlerCoverage() {
+        Test.startTest();
+        // Guard clauses
+        CivicTaxPaymentTriggerHandler.rollupAssessmentBalances(null);
+        CivicTaxPaymentTriggerHandler.rollupAssessmentBalances(new Set<Id>());
+
+        // Recursion prevention branches
+        CivicTaxRecursionControl.isPaymentTriggerRunning = true;
+        CivicTaxPaymentTriggerHandler.handleAfterInsert(new List<Tax_Payment__c>());
+        CivicTaxPaymentTriggerHandler.handleAfterUpdate(new List<Tax_Payment__c>(), new Map<Id, Tax_Payment__c>());
+        CivicTaxPaymentTriggerHandler.handleAfterDelete(new List<Tax_Payment__c>());
+        CivicTaxRecursionControl.isPaymentTriggerRunning = false;
+
+        // Insert payment without explicit reference or status to cover defaults
+        Tax_Assessment__c asm = [SELECT Id FROM Tax_Assessment__c WHERE Property__r.Property_Number__c = 'SEC-PROP-001' LIMIT 1];
+        Tax_Payment__c defaultPmt = new Tax_Payment__c(
+            Assessment__c = asm.Id,
+            Amount_Paid__c = 500.0,
+            Payment_Method__c = 'CASH_COUNTER',
+            Transaction_ID__c = 'SEC-COV-TXN-01'
+        );
+        insert defaultPmt;
+
+        Tax_Payment__c queriedPmt = [SELECT Payment_Reference__c, Transaction_Status__c FROM Tax_Payment__c WHERE Id = :defaultPmt.Id];
+        System.assertNotEquals(null, queriedPmt.Payment_Reference__c);
+        System.assertEquals('Initiated', queriedPmt.Transaction_Status__c);
+        Test.stopTest();
     }
 }
