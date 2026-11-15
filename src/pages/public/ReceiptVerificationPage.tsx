@@ -123,14 +123,17 @@ export const ReceiptVerificationPage: React.FC = () => {
           </p>
         </div>
 
-        {/* Demo Mode Notice */}
-        <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 flex items-start gap-3">
+        {/* Demo Mode Notice Banner */}
+        <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/60 border-2 border-amber-300 dark:border-amber-700 flex items-start gap-3 shadow-xs">
           <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
-          <div className="text-xs text-amber-900 dark:text-amber-200 space-y-1">
-            <span className="font-bold uppercase tracking-wider">
-              DEMO RECEIPT -- NOT VALID FOR REAL TAX PAYMENT
+          <div className="text-xs text-amber-950 dark:text-amber-200 space-y-1">
+            <span className="font-extrabold uppercase tracking-wider block text-sm">
+              DEMO RECEIPT
             </span>
-            <p className="text-amber-800 dark:text-amber-300">
+            <p className="font-bold text-amber-900 dark:text-amber-300">
+              ACADEMIC PROJECT DEMONSTRATION  •  NOT VALID FOR REAL TAX PAYMENT
+            </p>
+            <p className="text-[11px] text-amber-800 dark:text-amber-400">
               This verification interface is an academic project demonstration for municipal revenue systems. No real legal property tax liability was collected or settled.
             </p>
           </div>
@@ -324,11 +327,11 @@ export const ReceiptVerificationPage: React.FC = () => {
           </div>
         )}
 
-        {/* Project Developer Information Section */}
-        <div className="p-6 rounded-3xl bg-[#101D32] text-white border border-slate-800 shadow-xl space-y-3">
-          <div className="flex items-center justify-between">
+        {/* Mandatory Project Developer Information Section */}
+        <div className="p-6 rounded-3xl bg-[#101D32] text-white border-2 border-amber-500/80 shadow-xl space-y-3">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-2">
             <span className="text-[11px] uppercase font-bold tracking-widest text-amber-400">
-              Project Developer
+              PROJECT DEVELOPED BY
             </span>
             <span className="text-[10px] text-slate-400">
               Academic E-Governance Architecture
@@ -336,40 +339,43 @@ export const ReceiptVerificationPage: React.FC = () => {
           </div>
 
           <div>
-            <h4 className="text-base font-extrabold text-white">
+            <h4 className="text-lg font-extrabold text-white tracking-wide">
               PALLAPU DILEEP KUMAR
             </h4>
+            <p className="text-xs font-semibold text-slate-200 mt-0.5">
+              B.Tech — Computer Science and Engineering
+            </p>
             <p className="text-xs text-slate-300">
-              Department of Computer Science and Engineering • Vel Tech University, Chennai
+              Vel Tech University
             </p>
           </div>
 
-          <div className="pt-2 border-t border-slate-800 flex flex-wrap gap-4 text-xs font-semibold text-blue-400">
+          <div className="pt-2 border-t border-slate-800 flex flex-wrap gap-4 text-xs font-semibold text-blue-300">
             <a
               href="https://dileepkumarpallapu.github.io/My-Portfolio/"
               target="_blank"
               rel="noopener noreferrer"
-              className="hover:text-blue-300 hover:underline flex items-center gap-1"
+              className="hover:text-white hover:underline flex items-center gap-1"
             >
-              <span>Portfolio</span>
+              <span>Portfolio: https://dileepkumarpallapu.github.io/My-Portfolio/</span>
               <ExternalLink className="w-3 h-3" />
             </a>
             <a
               href="https://github.com/DileepKumarPallapu"
               target="_blank"
               rel="noopener noreferrer"
-              className="hover:text-blue-300 hover:underline flex items-center gap-1"
+              className="hover:text-white hover:underline flex items-center gap-1"
             >
-              <span>GitHub</span>
+              <span>GitHub: https://github.com/DileepKumarPallapu</span>
               <ExternalLink className="w-3 h-3" />
             </a>
             <a
               href="https://www.linkedin.com/in/dileep-kumar-pallapu"
               target="_blank"
               rel="noopener noreferrer"
-              className="hover:text-blue-300 hover:underline flex items-center gap-1"
+              className="hover:text-white hover:underline flex items-center gap-1"
             >
-              <span>LinkedIn</span>
+              <span>LinkedIn: https://www.linkedin.com/in/dileep-kumar-pallapu</span>
               <ExternalLink className="w-3 h-3" />
             </a>
           </div>

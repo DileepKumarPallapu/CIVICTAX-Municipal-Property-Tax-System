@@ -1,6 +1,6 @@
 import { jsPDF } from 'jspdf';
 import QRCode from 'qrcode';
-import { Payment, Property, TaxAssessment } from '../types';
+import { Payment, Property, TaxAssessment } from '../types/index';
 import { StorageService } from './storageService';
 
 export interface ReceiptPdfOptions {
@@ -162,13 +162,14 @@ export async function generateReceiptPdf(options: ReceiptPdfOptions): Promise<js
     orientation: 'portrait',
     unit: 'mm',
     format: 'a4',
-    compress: false,
+    compress: false, // Ensures clear text streams for searchability and verification
   });
 
   // Colors
   const navyDark = [16, 29, 50];       // #101D32
   const navyHeader = [30, 58, 138];     // #1E3A8A
   const goldAccent = [217, 119, 6];     // #D97706
+  const goldLight = [245, 158, 11];     // #F59E0B
   const emeraldPaid = [5, 150, 105];    // #059669
   const textDark = [23, 32, 51];        // #172033
   const textMuted = [100, 116, 139];    // #64748B
@@ -176,36 +177,76 @@ export async function generateReceiptPdf(options: ReceiptPdfOptions): Promise<js
   const bgCard = [248, 250, 252];       // #F8FAFC
   const bgCallout = [239, 246, 255];    // #EFF6FF
 
-  const startX = 14;
-  const contentWidth = 182; // 210 - 28
-  let currentY = 12;
+  const startX = 12;
+  const contentWidth = 186; // 210 - 24
 
   // ==========================================
-  // 1. TOP DEMO WATERMARK BANNER
+  // BACKGROUND WATERMARK: SUBTLE DIAGONAL DEMO
   // ==========================================
-  doc.setFillColor(254, 243, 199); // #FEF3C7 (amber-100)
+  if (isDemo) {
+    const docAny = doc as any;
+    if (docAny.GState && docAny.setGState) {
+      try {
+        docAny.setGState(new docAny.GState({ opacity: 0.07 }));
+      } catch {
+        // Fallback gracefully
+      }
+    }
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(54);
+    doc.setTextColor(100, 116, 139);
+    doc.text('DEMO RECEIPT', 105, 140, { align: 'center', angle: 45 });
+    doc.setFontSize(20);
+    doc.text('ACADEMIC PROJECT DEMONSTRATION', 105, 158, { align: 'center', angle: 45 });
+    doc.setFontSize(16);
+    doc.text('NOT VALID FOR REAL TAX PAYMENT', 105, 172, { align: 'center', angle: 45 });
+    if (docAny.GState && docAny.setGState) {
+      try {
+        docAny.setGState(new docAny.GState({ opacity: 1.0 }));
+      } catch {
+        // Fallback gracefully
+      }
+    }
+  }
+
+  let currentY = 10;
+
+  // ==========================================
+  // 1. MANDATORY TOP DEMO IDENTIFICATION BANNER
+  // ==========================================
+  // Display prominent, clearly visible banner at the top:
+  // DEMO RECEIPT
+  // ACADEMIC PROJECT DEMONSTRATION
+  // NOT VALID FOR REAL TAX PAYMENT
+  const topBannerHeight = 15;
+  doc.setFillColor(254, 243, 199); // #FEF3C7 amber-100
   doc.setDrawColor(goldAccent[0], goldAccent[1], goldAccent[2]);
-  doc.setLineWidth(0.4);
-  doc.roundedRect(startX, currentY, contentWidth, 8, 1.5, 1.5, 'FD');
+  doc.setLineWidth(0.6);
+  doc.roundedRect(startX, currentY, contentWidth, topBannerHeight, 2, 2, 'FD');
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8.5);
-  doc.setTextColor(goldAccent[0], goldAccent[1], goldAccent[2]);
+  doc.setFontSize(10);
+  doc.setTextColor(146, 64, 14); // amber-900
+  doc.text('DEMO RECEIPT', 105, currentY + 4.8, { align: 'center' });
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(180, 83, 9); // amber-700
   doc.text(
-    'DEMO RECEIPT -- NOT VALID FOR REAL TAX PAYMENT (ACADEMIC DEMONSTRATION)',
+    'ACADEMIC PROJECT DEMONSTRATION  *  NOT VALID FOR REAL TAX PAYMENT',
     105,
-    currentY + 5.2,
+    currentY + 10.5,
     { align: 'center' }
   );
 
-  currentY += 12;
+  currentY += topBannerHeight + 4;
 
   // ==========================================
   // 2. HEADER: LOGO, MUNICIPAL SEAL & RECEIPT TITLE
   // ==========================================
-  // Navy Header Banner Box
+  const headerHeight = 25;
   doc.setFillColor(navyDark[0], navyDark[1], navyDark[2]);
-  doc.roundedRect(startX, currentY, contentWidth, 26, 2, 2, 'F');
+  doc.roundedRect(startX, currentY, contentWidth, headerHeight, 2, 2, 'F');
 
   // CivicTax CT Logo Badge
   doc.setFillColor(37, 99, 235); // Blue-600
@@ -217,228 +258,241 @@ export async function generateReceiptPdf(options: ReceiptPdfOptions): Promise<js
 
   // Organization Titles
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(14);
+  doc.setFontSize(13);
   doc.setTextColor(255, 255, 255);
-  doc.text('CIVICTAX MUNICIPAL CORPORATION', startX + 26, currentY + 9.5);
+  doc.text('CIVICTAX MUNICIPAL CORPORATION', startX + 26, currentY + 9);
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8);
+  doc.setFontSize(7.5);
   doc.setTextColor(191, 219, 254); // Blue-200
   doc.text(
     'DIRECTORATE OF MUNICIPAL REVENUE & E-GOVERNANCE TAXATION GATEWAY',
     startX + 26,
-    currentY + 14.5
+    currentY + 14
   );
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8);
-  doc.setTextColor(253, 224, 71); // Yellow-300
+  doc.setTextColor(253, 224, 71); // Gold/Yellow
   doc.text(
     'OFFICIAL E-CHALLAN & PROPERTY TAX PAYMENT RECEIPT',
     startX + 26,
-    currentY + 19.5
+    currentY + 19
   );
 
   // Status Badge on Right of Header
   doc.setFillColor(emeraldPaid[0], emeraldPaid[1], emeraldPaid[2]);
-  doc.roundedRect(startX + contentWidth - 32, currentY + 4.5, 28, 8, 1.5, 1.5, 'F');
+  doc.roundedRect(startX + contentWidth - 34, currentY + 4, 30, 8, 1.5, 1.5, 'F');
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
   doc.setTextColor(255, 255, 255);
-  doc.text('STATUS: PAID', startX + contentWidth - 18, currentY + 9.8, { align: 'center' });
+  doc.text('STATUS: PAID', startX + contentWidth - 19, currentY + 9.5, { align: 'center' });
 
   // Receipt Number on Top Right below badge
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8);
+  doc.setFontSize(8.5);
   doc.setTextColor(255, 255, 255);
-  doc.text(payment.receiptNumber, startX + contentWidth - 18, currentY + 18, { align: 'center' });
+  doc.text(payment.receiptNumber, startX + contentWidth - 19, currentY + 18, { align: 'center' });
 
-  currentY += 30;
+  currentY += headerHeight + 4;
 
   // ==========================================
   // 3. RECEIPT IDENTIFIERS & QR VERIFICATION CARD
   // ==========================================
-  const cardHeight = 36;
+  const cardHeight = 32;
   doc.setFillColor(bgCard[0], bgCard[1], bgCard[2]);
   doc.setDrawColor(borderLight[0], borderLight[1], borderLight[2]);
   doc.setLineWidth(0.3);
   doc.roundedRect(startX, currentY, contentWidth, cardHeight, 2, 2, 'FD');
 
-  // Left side: Receipt Metadata
+  // Left column: Receipt Number & Transaction ID
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7.5);
+  doc.setFontSize(7);
   doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
-  doc.text('RECEIPT NUMBER', startX + 6, currentY + 7);
+  doc.text('RECEIPT NUMBER', startX + 5, currentY + 6.5);
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10.5);
+  doc.setFontSize(10);
   doc.setTextColor(navyHeader[0], navyHeader[1], navyHeader[2]);
-  doc.text(payment.receiptNumber, startX + 6, currentY + 12);
+  doc.text(payment.receiptNumber, startX + 5, currentY + 11.5);
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7.5);
+  doc.setFontSize(7);
   doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
-  doc.text('TRANSACTION REFERENCE ID', startX + 6, currentY + 19);
+  doc.text('TRANSACTION REFERENCE ID', startX + 5, currentY + 18);
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(9.5);
+  doc.setFontSize(9);
   doc.setTextColor(textDark[0], textDark[1], textDark[2]);
-  doc.text(payment.transactionId, startX + 6, currentY + 24);
+  doc.text(payment.transactionId, startX + 5, currentY + 23);
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7.5);
+  doc.setFontSize(7);
   doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
-  doc.text('PAYMENT DATE & TIME', startX + 6, currentY + 30);
+  doc.text('PAYMENT DATE & TIME', startX + 5, currentY + 28.5);
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8.5);
+  doc.setFontSize(8);
   doc.setTextColor(textDark[0], textDark[1], textDark[2]);
-  doc.text(formattedPaymentDate, startX + 46, currentY + 30);
+  doc.text(formattedPaymentDate, startX + 42, currentY + 28.5);
 
   // Center column: Assessment Year & Payment Method
   const colCenter = startX + 80;
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7.5);
+  doc.setFontSize(7);
   doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
-  doc.text('ASSESSMENT YEAR', colCenter, currentY + 7);
+  doc.text('ASSESSMENT YEAR', colCenter, currentY + 6.5);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9.5);
   doc.setTextColor(textDark[0], textDark[1], textDark[2]);
-  doc.text(payment.assessmentYear || '2024-2025', colCenter, currentY + 12);
+  doc.text(payment.assessmentYear || '2024-2025', colCenter, currentY + 11.5);
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7.5);
+  doc.setFontSize(7);
   doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
-  doc.text('PAYMENT METHOD', colCenter, currentY + 19);
+  doc.text('PAYMENT METHOD', colCenter, currentY + 18);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
   doc.setTextColor(textDark[0], textDark[1], textDark[2]);
-  doc.text(payment.paymentMethod.replace(/_/g, ' '), colCenter, currentY + 24);
+  doc.text(payment.paymentMethod.replace(/_/g, ' '), colCenter, currentY + 23);
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7.5);
+  doc.setFontSize(7);
   doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
-  doc.text('GATEWAY REFERENCE', colCenter, currentY + 30);
+  doc.text('GATEWAY REFERENCE', colCenter, currentY + 28.5);
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8);
+  doc.setFontSize(7.5);
   doc.setTextColor(textDark[0], textDark[1], textDark[2]);
-  doc.text(payment.gatewayRef || 'HDFC-PG-AUTO', colCenter + 36, currentY + 30);
+  doc.text(payment.gatewayRef || 'HDFC-PG-AUTO', colCenter + 35, currentY + 28.5);
 
   // Right side: QR Code Box
   if (qrDataUrl) {
-    const qrSize = 26;
-    const qrX = startX + contentWidth - qrSize - 6;
-    const qrY = currentY + 3.5;
+    const qrSize = 23;
+    const qrX = startX + contentWidth - qrSize - 5;
+    const qrY = currentY + 3;
     doc.addImage(qrDataUrl, 'PNG', qrX, qrY, qrSize, qrSize);
 
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(6.5);
+    doc.setFontSize(6);
     doc.setTextColor(navyHeader[0], navyHeader[1], navyHeader[2]);
-    doc.text('SCAN TO VERIFY', qrX + qrSize / 2, qrY + qrSize + 3.2, { align: 'center' });
+    doc.text('SCAN TO VERIFY', qrX + qrSize / 2, qrY + qrSize + 3, { align: 'center' });
   }
 
-  currentY += cardHeight + 6;
+  currentY += cardHeight + 4;
 
   // ==========================================
   // 4. SECTION A: TAXPAYER & PROPERTY INFORMATION
   // ==========================================
   doc.setFillColor(navyHeader[0], navyHeader[1], navyHeader[2]);
-  doc.rect(startX, currentY, contentWidth, 6, 'F');
+  doc.rect(startX, currentY, contentWidth, 5.5, 'F');
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8.5);
+  doc.setFontSize(8);
   doc.setTextColor(255, 255, 255);
-  doc.text('SECTION A: TAXPAYER & PROPERTY PARTICULARS', startX + 4, currentY + 4.2);
+  doc.text('SECTION A: TAXPAYER & PROPERTY PARTICULARS', startX + 4, currentY + 4);
 
-  currentY += 6;
+  currentY += 5.5;
 
-  const propBoxHeight = 38;
+  const propBoxHeight = 36;
   doc.setFillColor(bgCard[0], bgCard[1], bgCard[2]);
   doc.setDrawColor(borderLight[0], borderLight[1], borderLight[2]);
   doc.rect(startX, currentY, contentWidth, propBoxHeight, 'FD');
 
-  const row1Y = currentY + 7;
-  const row2Y = currentY + 16;
-  const row3Y = currentY + 25;
-  const row4Y = currentY + 33;
+  const r1Y = currentY + 6.5;
+  const r2Y = currentY + 15;
+  const r3Y = currentY + 23.5;
+  const r4Y = currentY + 31.5;
 
   // Row 1: Taxpayer Name & Property Number
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8);
+  doc.setFontSize(7.5);
   doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
-  doc.text('Taxpayer Full Name:', startX + 4, row1Y);
+  doc.text('Taxpayer Full Name:', startX + 4, r1Y);
   doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
   doc.setTextColor(textDark[0], textDark[1], textDark[2]);
-  doc.text(payment.payerName, startX + 38, row1Y);
+  doc.text(payment.payerName, startX + 38, r1Y);
 
   doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
   doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
-  doc.text('Property Number (PID):', startX + 96, row1Y);
+  doc.text('Property ID (PID):', startX + 96, r1Y);
   doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
   doc.setTextColor(navyHeader[0], navyHeader[1], navyHeader[2]);
-  doc.text(payment.propertyNumber, startX + 138, row1Y);
+  doc.text(payment.propertyNumber, startX + 132, r1Y);
 
   // Row 2: Contact Details & Property Category
   doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
   doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
-  doc.text('Taxpayer Email / Phone:', startX + 4, row2Y);
+  doc.text('Taxpayer Email / Phone:', startX + 4, r2Y);
   doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
   doc.setTextColor(textDark[0], textDark[1], textDark[2]);
-  doc.text(`${payment.payerEmail || 'citizen@civictax.demo'}  |  ${payment.payerPhone || '+91 98765 43210'}`, startX + 38, row2Y);
+  doc.text(`${payment.payerEmail || 'citizen@civictax.demo'}  |  ${payment.payerPhone || '+91 98765 43210'}`, startX + 38, r2Y);
 
   doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
   doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
-  doc.text('Property Category:', startX + 96, row2Y);
+  doc.text('Property Type:', startX + 96, r2Y);
   doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
   doc.setTextColor(textDark[0], textDark[1], textDark[2]);
-  doc.text(property?.category || 'RESIDENTIAL', startX + 138, row2Y);
+  doc.text(property?.category || 'RESIDENTIAL', startX + 132, r2Y);
 
   // Row 3: Assessment Number & Built-up Area
   doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
   doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
-  doc.text('Assessment Number:', startX + 4, row3Y);
+  doc.text('Assessment Number:', startX + 4, r3Y);
   doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
   doc.setTextColor(textDark[0], textDark[1], textDark[2]);
-  doc.text(payment.assessmentNumber, startX + 38, row3Y);
+  doc.text(payment.assessmentNumber, startX + 38, r3Y);
 
   doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
   doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
-  doc.text('Built-up Area / Zone:', startX + 96, row3Y);
+  doc.text('Built-up Area / Zone:', startX + 96, r3Y);
   doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
   doc.setTextColor(textDark[0], textDark[1], textDark[2]);
   const areaZoneText = `${property?.builtUpArea || assessment?.builtUpArea || 1200} sq ft  (${property?.zoneName || assessment?.zoneName || 'Central Zone'})`;
-  doc.text(areaZoneText, startX + 138, row3Y);
+  doc.text(areaZoneText, startX + 132, r3Y);
 
   // Row 4: Property Address
   doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
   doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
-  doc.text('Property Address:', startX + 4, row4Y);
+  doc.text('Property Address:', startX + 4, r4Y);
   doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
   doc.setTextColor(textDark[0], textDark[1], textDark[2]);
   const addressText = property?.address || 'Flat 402, Shanti Heights, M.G. Road, Pune - 411001';
-  doc.text(addressText, startX + 38, row4Y);
+  doc.text(addressText, startX + 38, r4Y);
 
-  currentY += propBoxHeight + 6;
+  currentY += propBoxHeight + 4;
 
   // ==========================================
   // 5. SECTION B: TAX ASSESSMENT & PAYMENT BREAKDOWN
   // ==========================================
   doc.setFillColor(navyHeader[0], navyHeader[1], navyHeader[2]);
-  doc.rect(startX, currentY, contentWidth, 6, 'F');
+  doc.rect(startX, currentY, contentWidth, 5.5, 'F');
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8.5);
+  doc.setFontSize(8);
   doc.setTextColor(255, 255, 255);
-  doc.text('SECTION B: FINANCIAL ASSESSMENT & PAYMENT LEDGER', startX + 4, currentY + 4.2);
+  doc.text('SECTION B: FINANCIAL ASSESSMENT & PAYMENT LEDGER', startX + 4, currentY + 4);
 
-  currentY += 6;
+  currentY += 5.5;
 
   // Table Header
   doc.setFillColor(241, 245, 249); // slate-100
-  doc.rect(startX, currentY, contentWidth, 6.5, 'FD');
+  doc.rect(startX, currentY, contentWidth, 5.5, 'FD');
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7.5);
+  doc.setFontSize(7);
   doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
-  doc.text('PARTICULARS / TAX COMPONENT', startX + 4, currentY + 4.5);
-  doc.text('RATE / APPLIED BASIS', startX + 90, currentY + 4.5);
-  doc.text('AMOUNT (INR)', startX + contentWidth - 4, currentY + 4.5, { align: 'right' });
+  doc.text('TAX COMPONENT / PARTICULARS', startX + 4, currentY + 3.8);
+  doc.text('CALCULATION BASIS', startX + 90, currentY + 3.8);
+  doc.text('AMOUNT (INR)', startX + contentWidth - 4, currentY + 3.8, { align: 'right' });
 
-  currentY += 6.5;
+  currentY += 5.5;
 
   // Ledger Items
   const ledgerRows = [
@@ -449,14 +503,14 @@ export async function generateReceiptPdf(options: ReceiptPdfOptions): Promise<js
       isNegative: false,
     },
     {
-      label: 'Late Payment Penalty / Surcharge',
-      basis: penalty > 0 ? 'Statutory Penalty' : 'Zero Penalty (On-Time Payment)',
+      label: 'Late Payment Statutory Penalty',
+      basis: penalty > 0 ? 'Mandatory Statutory Surcharge' : 'Zero Penalty (On-Time Filing)',
       amount: `Rs. ${penalty.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
       isNegative: false,
     },
     {
       label: 'Early Settlement Incentive / Rebate',
-      basis: discount > 0 ? 'Municipal Early-Filing Concession' : 'None Applicable',
+      basis: discount > 0 ? 'Early-Filing Concession Applied' : 'None Applicable',
       amount: discount > 0
         ? `- Rs. ${discount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
         : `Rs. 0.00`,
@@ -464,7 +518,7 @@ export async function generateReceiptPdf(options: ReceiptPdfOptions): Promise<js
     },
     {
       label: 'Solid Waste Management & Sanitation Cess',
-      basis: 'Municipal SWM Standard Schedule',
+      basis: 'Municipal SWM Schedule',
       amount: 'Rs. 0.00',
       isNegative: false,
     },
@@ -474,155 +528,177 @@ export async function generateReceiptPdf(options: ReceiptPdfOptions): Promise<js
     const row = ledgerRows[i];
     const isEven = i % 2 === 0;
     doc.setFillColor(isEven ? 255 : 248, isEven ? 255 : 250, isEven ? 255 : 252);
-    doc.rect(startX, currentY, contentWidth, 6, 'FD');
-
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(8);
-    doc.setTextColor(textDark[0], textDark[1], textDark[2]);
-    doc.text(row.label, startX + 4, currentY + 4.2);
+    doc.rect(startX, currentY, contentWidth, 5.5, 'FD');
 
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(7.5);
+    doc.setTextColor(textDark[0], textDark[1], textDark[2]);
+    doc.text(row.label, startX + 4, currentY + 3.8);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7);
     doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
-    doc.text(row.basis, startX + 90, currentY + 4.2);
+    doc.text(row.basis, startX + 90, currentY + 3.8);
 
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(8);
+    doc.setFontSize(7.5);
     doc.setTextColor(row.isNegative ? 5 : textDark[0], row.isNegative ? 150 : textDark[1], row.isNegative ? 105 : textDark[2]);
-    doc.text(row.amount, startX + contentWidth - 4, currentY + 4.2, { align: 'right' });
+    doc.text(row.amount, startX + contentWidth - 4, currentY + 3.8, { align: 'right' });
 
-    currentY += 6;
+    currentY += 5.5;
   }
 
   // Net Assessment Total Subtotal Row
   doc.setFillColor(241, 245, 249);
-  doc.rect(startX, currentY, contentWidth, 6.5, 'FD');
+  doc.rect(startX, currentY, contentWidth, 6, 'FD');
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8);
+  doc.setFontSize(7.5);
   doc.setTextColor(textDark[0], textDark[1], textDark[2]);
-  doc.text('NET ASSESSED TAX DEMAND', startX + 4, currentY + 4.5);
+  doc.text('NET ASSESSED TAX DEMAND', startX + 4, currentY + 4.2);
   doc.text(
     `Rs. ${totalDemand.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
     startX + contentWidth - 4,
-    currentY + 4.5,
+    currentY + 4.2,
     { align: 'right' }
   );
 
-  currentY += 9;
+  currentY += 8;
 
   // ==========================================
   // 6. TOTAL AMOUNT PAID CALLOUT BOX
   // ==========================================
-  const calloutHeight = 22;
+  const calloutHeight = 20;
   doc.setFillColor(bgCallout[0], bgCallout[1], bgCallout[2]);
   doc.setDrawColor(37, 99, 235);
   doc.setLineWidth(0.6);
   doc.roundedRect(startX, currentY, contentWidth, calloutHeight, 2, 2, 'FD');
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8);
+  doc.setFontSize(7.5);
   doc.setTextColor(30, 64, 175); // Blue-800
-  doc.text('TOTAL AMOUNT RECEIVED & CREDITED TO MUNICIPAL TREASURY', startX + 6, currentY + 6);
+  doc.text('TOTAL AMOUNT RECEIVED & CREDITED TO MUNICIPAL TREASURY', startX + 6, currentY + 5.5);
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(16);
+  doc.setFontSize(15);
   doc.setTextColor(30, 58, 138); // Blue-900
   doc.text(
     `Rs. ${amountPaid.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}  (INR)`,
     startX + 6,
-    currentY + 14
+    currentY + 13.5
   );
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8);
+  doc.setFontSize(7.5);
   doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
-  doc.text(`Remaining Balance:`, startX + contentWidth - 55, currentY + 8);
+  doc.text(`Remaining Balance:`, startX + contentWidth - 55, currentY + 7);
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10);
+  doc.setFontSize(9.5);
   doc.setTextColor(remainingBalance > 0 ? 217 : 5, remainingBalance > 0 ? 119 : 150, remainingBalance > 0 ? 6 : 105);
   doc.text(
     `Rs. ${remainingBalance.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
     startX + contentWidth - 6,
-    currentY + 8,
+    currentY + 7,
     { align: 'right' }
   );
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(7.5);
   doc.setTextColor(emeraldPaid[0], emeraldPaid[1], emeraldPaid[2]);
-  doc.text('Payment Status: FULLY SETTLED / PAID', startX + contentWidth - 6, currentY + 16, { align: 'right' });
+  doc.text('Payment Status: FULLY SETTLED / PAID', startX + contentWidth - 6, currentY + 15, { align: 'right' });
 
-  currentY += calloutHeight + 6;
+  currentY += calloutHeight + 4;
 
   // ==========================================
   // 7. SECURITY & DIGITAL SIGNATURE SEAL
   // ==========================================
+  const sealHeight = 14;
   doc.setFillColor(bgCard[0], bgCard[1], bgCard[2]);
   doc.setDrawColor(borderLight[0], borderLight[1], borderLight[2]);
   doc.setLineWidth(0.3);
-  doc.roundedRect(startX, currentY, contentWidth, 18, 1.5, 1.5, 'FD');
+  doc.roundedRect(startX, currentY, contentWidth, sealHeight, 1.5, 1.5, 'FD');
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7.5);
+  doc.setFontSize(7);
   doc.setTextColor(emeraldPaid[0], emeraldPaid[1], emeraldPaid[2]);
-  doc.text('DIGITAL AUDIT TRAIL & VERIFICATION SEAL', startX + 4, currentY + 5.5);
+  doc.text('DIGITAL AUDIT TRAIL & E-GOVERNANCE VERIFICATION SEAL', startX + 4, currentY + 4.5);
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(6.8);
+  doc.setFontSize(6.5);
   doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
   doc.text(
     `Digital Verification Reference: SHA256-${payment.id.replace(/[^a-zA-Z0-9]/g, '').slice(0, 16).toUpperCase()}-${payment.transactionId}`,
     startX + 4,
-    currentY + 10.5
+    currentY + 8.5
   );
 
   doc.text(
-    `Electronic Challan generated on ${generatedDateStr} via CivicTax Municipal E-Governance Architecture.`,
+    `Electronic Challan generated on ${generatedDateStr} via CivicTax Municipal Architecture.`,
     startX + 4,
-    currentY + 15
+    currentY + 12
   );
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7);
+  doc.setFontSize(6.5);
   doc.setTextColor(navyHeader[0], navyHeader[1], navyHeader[2]);
-  doc.text('CivicTax Authority E-Sign', startX + contentWidth - 4, currentY + 10, { align: 'right' });
-  doc.text('[Digitally Verified]', startX + contentWidth - 4, currentY + 14.5, { align: 'right' });
+  doc.text('CivicTax Municipal Revenue Authority', startX + contentWidth - 4, currentY + 8, { align: 'right' });
+  doc.text('[Digitally Signed & Validated]', startX + contentWidth - 4, currentY + 11.5, { align: 'right' });
 
-  currentY += 22;
+  currentY += sealHeight + 4;
 
   // ==========================================
-  // 8. TASTEFUL DEVELOPER FOOTER SECTION
+  // 8. MANDATORY DEVELOPER INFORMATION SECTION
   // ==========================================
-  // Distinctive developer footer section clearly labeled "Project Developer"
+  // Dedicated, professionally designed footer section titled:
+  // PROJECT DEVELOPED BY
+  // PALLAPU DILEEP KUMAR
+  // B.Tech — Computer Science and Engineering
+  // Vel Tech University
+  // Portfolio: https://dileepkumarpallapu.github.io/My-Portfolio/
+  // GitHub: https://github.com/DileepKumarPallapu
+  // LinkedIn: https://www.linkedin.com/in/dileep-kumar-pallapu
+  const devSectionHeight = 36;
   doc.setFillColor(navyDark[0], navyDark[1], navyDark[2]);
-  doc.roundedRect(startX, currentY, contentWidth, 24, 1.5, 1.5, 'F');
+  doc.setDrawColor(goldLight[0], goldLight[1], goldLight[2]);
+  doc.setLineWidth(0.5);
+  doc.roundedRect(startX, currentY, contentWidth, devSectionHeight, 2, 2, 'FD');
 
+  // Title: PROJECT DEVELOPED BY
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7);
-  doc.setTextColor(253, 224, 71); // Gold/Yellow label
-  doc.text('PROJECT DEVELOPER (ACADEMIC ARCHITECT)', startX + 5, currentY + 5.5);
+  doc.setFontSize(8);
+  doc.setTextColor(253, 224, 71); // Gold/Yellow
+  doc.text('PROJECT DEVELOPED BY', startX + 6, currentY + 6);
 
+  // Full Name: PALLAPU DILEEP KUMAR (Prominent bold text)
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(9);
+  doc.setFontSize(13);
   doc.setTextColor(255, 255, 255);
-  doc.text('Developed By: PALLAPU DILEEP KUMAR', startX + 5, currentY + 11);
+  doc.text('PALLAPU DILEEP KUMAR', startX + 6, currentY + 13);
 
+  // Degree & Institution
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.setTextColor(226, 232, 240); // Slate-200
+  doc.text(
+    'B.Tech -- Computer Science and Engineering  |  Vel Tech University',
+    startX + 6,
+    currentY + 19
+  );
+
+  // Developer Links
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7.5);
-  doc.setTextColor(203, 213, 225); // Slate-300
+  doc.setTextColor(147, 197, 253); // Blue-300
+
   doc.text(
-    'Department of Computer Science and Engineering  |  Vel Tech University, Chennai',
-    startX + 5,
-    currentY + 16
+    'Portfolio: https://dileepkumarpallapu.github.io/My-Portfolio/',
+    startX + 6,
+    currentY + 24.5
   );
 
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7);
-  doc.setTextColor(147, 197, 253); // Blue-300
   doc.text(
-    'Portfolio: https://dileepkumarpallapu.github.io/My-Portfolio/   *   GitHub: DileepKumarPallapu   *   LinkedIn: dileep-kumar-pallapu',
-    startX + 5,
-    currentY + 20.5
+    'GitHub: https://github.com/DileepKumarPallapu    |    LinkedIn: https://www.linkedin.com/in/dileep-kumar-pallapu',
+    startX + 6,
+    currentY + 30
   );
 
   return doc;

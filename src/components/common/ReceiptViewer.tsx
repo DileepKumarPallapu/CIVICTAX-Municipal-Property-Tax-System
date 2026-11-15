@@ -248,12 +248,29 @@ export const ReceiptViewer: React.FC<ReceiptViewerProps> = ({
           </div>
         ) : (
           /* Printable & On-Screen Receipt Container */
-          <div ref={receiptRef} className="pt-5 space-y-5">
-            {/* 1. Academic Demo Watermark Banner */}
-            <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800/60 text-center">
-              <span className="text-[11px] font-extrabold uppercase tracking-wider text-amber-800 dark:text-amber-300">
-                DEMO RECEIPT -- NOT VALID FOR REAL TAX PAYMENT (ACADEMIC DEMONSTRATION)
+          <div ref={receiptRef} className="pt-5 space-y-5 relative overflow-hidden">
+            {/* Subtle Diagonal DEMO Watermark */}
+            {isDemo && (
+              <div
+                aria-hidden="true"
+                className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none select-none z-0 opacity-[0.04] dark:opacity-[0.07]"
+              >
+                <div className="transform -rotate-30 text-center font-black tracking-widest text-slate-900 dark:text-white space-y-3">
+                  <span className="text-5xl sm:text-6xl block">DEMO RECEIPT</span>
+                  <span className="text-lg sm:text-2xl block">ACADEMIC PROJECT DEMONSTRATION</span>
+                  <span className="text-base sm:text-xl block">NOT VALID FOR REAL TAX PAYMENT</span>
+                </div>
+              </div>
+            )}
+
+            {/* 1. Mandatory Academic Demo Identification Banner */}
+            <div className="p-3.5 rounded-2xl bg-amber-50 dark:bg-amber-950/60 border-2 border-amber-300 dark:border-amber-700 text-center space-y-1 relative z-10">
+              <span className="text-xs sm:text-sm font-extrabold uppercase tracking-wider text-amber-900 dark:text-amber-200 block">
+                DEMO RECEIPT
               </span>
+              <p className="text-[11px] font-bold text-amber-800 dark:text-amber-300">
+                ACADEMIC PROJECT DEMONSTRATION  •  NOT VALID FOR REAL TAX PAYMENT
+              </p>
             </div>
 
             {/* 2. Header Box */}
@@ -451,52 +468,55 @@ export const ReceiptViewer: React.FC<ReceiptViewerProps> = ({
               </div>
             </div>
 
-            {/* 7. Tasteful Developer Footer Section */}
-            <div className="p-4 rounded-2xl bg-[#101D32] text-white border border-slate-800 space-y-2 text-xs">
-              <div className="flex items-center justify-between">
+            {/* 7. Mandatory Dedicated Project Developer Information Section */}
+            <div className="p-5 rounded-2xl bg-[#101D32] text-white border-2 border-amber-500/80 shadow-lg space-y-3 relative z-10">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
                 <span className="text-[10px] uppercase font-bold tracking-widest text-amber-400">
-                  Project Developer
+                  PROJECT DEVELOPED BY
                 </span>
                 <span className="text-[9px] text-slate-400">
                   Academic E-Governance Architecture
                 </span>
               </div>
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
-                  <h4 className="font-extrabold text-white text-xs">
+                  <h4 className="font-extrabold text-white text-base sm:text-lg tracking-wide">
                     PALLAPU DILEEP KUMAR
                   </h4>
-                  <p className="text-[11px] text-slate-300">
-                    Computer Science & Engineering • Vel Tech University
+                  <p className="text-xs font-semibold text-slate-200 mt-0.5">
+                    B.Tech — Computer Science and Engineering
+                  </p>
+                  <p className="text-xs text-slate-300">
+                    Vel Tech University
                   </p>
                 </div>
-                <div className="flex items-center gap-3 text-[11px] text-blue-400 font-medium">
+                <div className="flex flex-col sm:items-end gap-1.5 text-xs text-blue-300">
                   <a
                     href="https://dileepkumarpallapu.github.io/My-Portfolio/"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="hover:underline hover:text-blue-300 flex items-center gap-1"
+                    className="hover:underline hover:text-white flex items-center gap-1 font-medium"
                   >
                     <span>Portfolio</span>
-                    <ExternalLink className="w-2.5 h-2.5" />
+                    <ExternalLink className="w-3 h-3" />
                   </a>
                   <a
                     href="https://github.com/DileepKumarPallapu"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="hover:underline hover:text-blue-300 flex items-center gap-1"
+                    className="hover:underline hover:text-white flex items-center gap-1 font-medium"
                   >
-                    <span>GitHub</span>
-                    <ExternalLink className="w-2.5 h-2.5" />
+                    <span>GitHub: DileepKumarPallapu</span>
+                    <ExternalLink className="w-3 h-3" />
                   </a>
                   <a
                     href="https://www.linkedin.com/in/dileep-kumar-pallapu"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="hover:underline hover:text-blue-300 flex items-center gap-1"
+                    className="hover:underline hover:text-white flex items-center gap-1 font-medium"
                   >
-                    <span>LinkedIn</span>
-                    <ExternalLink className="w-2.5 h-2.5" />
+                    <span>LinkedIn: dileep-kumar-pallapu</span>
+                    <ExternalLink className="w-3 h-3" />
                   </a>
                 </div>
               </div>
