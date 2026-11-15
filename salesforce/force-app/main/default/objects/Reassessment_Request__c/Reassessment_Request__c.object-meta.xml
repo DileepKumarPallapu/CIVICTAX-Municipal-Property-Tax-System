@@ -17,5 +17,5 @@
         <type>AutoNumber</type>
     </nameField>
     <pluralLabel>Reassessment Requests</pluralLabel>
-    <sharingModel>ReadWrite</sharingModel>
+    <sharingModel>Private</sharingModel>
 </CustomObject>

@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { config } from '../config/index.js';
 import { PKCEUtils } from '../utils/pkce.js';
 import { SalesforceClient } from '../services/salesforceClient.js';
-import { SalesforceSessionData, SalesforceStatusResponse } from '../types/index.js';
+import { SalesforceSessionData, SalesforceStatusResponse, CivicTaxSessionUser } from '../types/index.js';
 
 // Augment express-session type
 declare module 'express-session' {
@@ -10,10 +10,61 @@ declare module 'express-session' {
     oauthState?: string;
     codeVerifier?: string;
     salesforceSession?: SalesforceSessionData;
+    civicTaxUser?: CivicTaxSessionUser;
   }
 }
 
 export const authRouter = Router();
+
+// Standard Municipal User Database for Server-Side Authentication
+const REGISTERED_USERS: Record<string, { passwordHash: string; user: CivicTaxSessionUser }> = {
+  'admin@civictax.demo': {
+    passwordHash: 'Admin@123',
+    user: { id: 'usr-admin-01', email: 'admin@civictax.demo', role: 'ADMIN', name: 'Vikram Malhotra' },
+  },
+  'officer@civictax.demo': {
+    passwordHash: 'Officer@123',
+    user: { id: 'usr-officer-01', email: 'officer@civictax.demo', role: 'OFFICER', name: 'Ananya Deshmukh' },
+  },
+  'citizen@civictax.demo': {
+    passwordHash: 'Citizen@123',
+    user: { id: 'usr-citizen-01', email: 'citizen@civictax.demo', role: 'CITIZEN', name: 'Rajesh Kumar Sharma' },
+  },
+};
+
+// POST /api/auth/login - Server-Side CivicTax User Login
+authRouter.post('/api/auth/login', (req: Request, res: Response) => {
+  const { email, password } = req.body;
+  if (!email || !password) {
+    res.status(400).json({ success: false, error: 'Email and password are required' });
+    return;
+  }
+
+  const record = REGISTERED_USERS[email.toLowerCase().trim()];
+  if (!record || record.passwordHash !== password) {
+    res.status(401).json({ success: false, error: 'Invalid email or password' });
+    return;
+  }
+
+  // Set server-verified user identity in HTTP-only session cookie
+  req.session.civicTaxUser = record.user;
+  res.json({ success: true, user: record.user });
+});
+
+// GET /api/auth/me - Current Authenticated User Session
+authRouter.get('/api/auth/me', (req: Request, res: Response) => {
+  if (!req.session.civicTaxUser) {
+    res.status(401).json({ authenticated: false, user: null });
+    return;
+  }
+  res.json({ authenticated: true, user: req.session.civicTaxUser });
+});
+
+// POST /api/auth/logout - Server-Side CivicTax User Logout
+authRouter.post('/api/auth/logout', (req: Request, res: Response) => {
+  delete req.session.civicTaxUser;
+  res.json({ success: true, message: 'Logged out successfully' });
+});
 
 // GET /auth/salesforce - Initiate OAuth 2.0 PKCE flow
 authRouter.get('/auth/salesforce', (req: Request, res: Response) => {

@@ -25,7 +25,7 @@ export const UserProfileMenu: React.FC = () => {
     setIsOpen(false);
     await logout();
     info('Logged out', 'You have been signed out of your demo session.');
-    navigate('/login');
+    navigate('/', { replace: true });
   };
 
   const getRoleBadge = (r: string | null) => {

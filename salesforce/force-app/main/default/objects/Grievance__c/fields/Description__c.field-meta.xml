@@ -3,7 +3,8 @@
     <fullName>Description__c</fullName>
     <description>Full narrative description of grievance</description>
     <label>Description</label>
-    <required>true</required>
+    <length>32768</length>
+    <required>false</required>
     <type>LongTextArea</type>
     <visibleLines>5</visibleLines>
 </CustomField>

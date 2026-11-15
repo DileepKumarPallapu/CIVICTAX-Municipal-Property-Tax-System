@@ -20,5 +20,5 @@
         <type>Text</type>
     </nameField>
     <pluralLabel>Grievances</pluralLabel>
-    <sharingModel>ReadWrite</sharingModel>
+    <sharingModel>Private</sharingModel>
 </CustomObject>

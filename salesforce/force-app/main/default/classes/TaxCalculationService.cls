@@ -11,6 +11,14 @@ public with sharing class TaxCalculationService {
         public Decimal totalTax;
     }
 
+    // Overloaded calculation: calculates tax directly given built-up area and custom rate
+    public static Decimal calculateTax(Decimal builtUpArea, Decimal ratePerSqFt) {
+        if (builtUpArea == null || builtUpArea <= 0 || ratePerSqFt == null || ratePerSqFt <= 0) {
+            return 0.00;
+        }
+        return (builtUpArea * ratePerSqFt).setScale(2, System.RoundingMode.HALF_UP);
+    }
+
     // Authoritative calculation of property tax based on category and area
     public static TaxCalculationResult calculateTax(String category, Decimal builtUpArea, Boolean isOverdue, Boolean isEarlyBird) {
         if (builtUpArea == null || builtUpArea <= 0) {

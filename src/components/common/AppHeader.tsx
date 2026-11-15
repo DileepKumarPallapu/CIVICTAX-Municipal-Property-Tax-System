@@ -1,25 +1,31 @@
 import React, { useState } from 'react';
-import { Menu, Sparkles, Search } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Menu, Sparkles, Search, GraduationCap } from 'lucide-react';
 import { ThemeToggle } from './ThemeToggle';
 import { NotificationDropdown } from './NotificationDropdown';
 import { UserProfileMenu } from './UserProfileMenu';
 import { GlobalSearchModal } from './GlobalSearchModal';
+import { useAuth } from '../../context/AuthContext';
 
 interface AppHeaderProps {
   onOpenMobile: () => void;
   isCollapsed: boolean;
 }
 
-export const AppHeader: React.FC<AppHeaderProps> = ({ onOpenMobile, isCollapsed }) => {
+export const AppHeader: React.FC<AppHeaderProps> = ({ onOpenMobile }) => {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const { role } = useAuth();
+
+  const demoGuidePath =
+    role === 'ADMIN'
+      ? '/admin/demo-guide'
+      : role === 'OFFICER'
+      ? '/officer/demo-guide'
+      : '/citizen/demo-guide';
 
   return (
     <>
-      <header
-        className={`sticky top-0 z-20 h-16 bg-white/85 dark:bg-[#080D18]/85 backdrop-blur-md border-b border-[#E2E8F0] dark:border-[#26354B] transition-all duration-200 ${
-          isCollapsed ? 'md:pl-16' : 'md:pl-64'
-        }`}
-      >
+      <header className="h-16 bg-white/90 dark:bg-[#080D18]/90 backdrop-blur-md border-b border-[#E2E8F0] dark:border-[#26354B] transition-colors duration-200">
         <div className="h-full px-4 sm:px-6 flex items-center justify-between gap-4">
           {/* Left: Mobile trigger & Search trigger */}
           <div className="flex items-center gap-3">
@@ -44,9 +50,18 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ onOpenMobile, isCollapsed 
 
           {/* Right: Actions, Notifications, Theme, Profile */}
           <div className="flex items-center gap-2 sm:gap-3">
-            <div className="hidden lg:flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 dark:bg-blue-950/40 border border-blue-200/60 dark:border-blue-900/50 text-[11px] font-semibold text-[#2563EB] dark:text-blue-400">
+            <Link
+              to={demoGuidePath}
+              className="hidden lg:flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-50 dark:bg-amber-950/40 border border-amber-200/60 dark:border-amber-900/50 text-[11px] font-semibold text-amber-700 dark:text-amber-300 hover:bg-amber-100 transition shadow-2xs"
+              title="Open Faculty Evaluation & Viva Defense Guide"
+            >
+              <GraduationCap className="w-3.5 h-3.5 text-amber-500" />
+              <span>Faculty Demo Guide</span>
+            </Link>
+
+            <div className="hidden xl:flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 dark:bg-blue-950/40 border border-blue-200/60 dark:border-blue-900/50 text-[11px] font-semibold text-[#2563EB] dark:text-blue-400">
               <Sparkles className="w-3.5 h-3.5 text-[#14B8A6]" />
-              <span>CivicTax 2.0 Premium</span>
+              <span>CivicTax 2.0</span>
             </div>
 
             <ThemeToggle />

@@ -3,6 +3,7 @@
     <fullName>Resolution_Comments__c</fullName>
     <description>Officer findings and resolution remarks</description>
     <label>Resolution Comments</label>
+    <length>32768</length>
     <required>false</required>
     <type>LongTextArea</type>
     <visibleLines>4</visibleLines>

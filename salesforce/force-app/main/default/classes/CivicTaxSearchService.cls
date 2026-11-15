@@ -10,8 +10,7 @@ public with sharing class CivicTaxSearchService {
         AggregateResult[] agg = [
             SELECT SUM(Total_Amount__c) totalDemand, SUM(Amount_Paid__c) totalCollected 
             FROM Tax_Assessment__c 
-            WHERE Property__r.Zone__c = :zoneCode 
-            WITH USER_MODE
+            WHERE Property__r.Zone__c = :zoneCode
         ];
 
         Decimal demand = 0;
@@ -40,7 +39,6 @@ public with sharing class CivicTaxSearchService {
                 Property__c(Id, Name, Property_Number__c, Property_Address__c, Verification_Status__c),
                 Grievance__c(Id, Name, Subject__c, Status__c, Priority__c),
                 Tax_Assessment__c(Id, Name, Assessment_Year__c, Total_Amount__c, Outstanding_Amount__c)
-            WITH USER_MODE
             LIMIT 50
         ];
 

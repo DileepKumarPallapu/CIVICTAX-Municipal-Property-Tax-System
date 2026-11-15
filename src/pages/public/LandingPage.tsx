@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
+import { useAuth } from '../../context/AuthContext';
 import {
   Building2,
   Receipt,
@@ -34,9 +35,28 @@ import {
 } from '../../utils/animations';
 
 export const LandingPage: React.FC = () => {
+  const { isAuthenticated, role, isLoading } = useAuth();
+  const navigate = useNavigate();
   const { success } = useToast();
   const [openFaq, setOpenFaq] = useState<number | null>(0);
   const [contactForm, setContactForm] = useState({ name: '', email: '', phone: '', query: '' });
+
+  // Prevent landing page flash and redirect authenticated users directly to their dashboard
+  useEffect(() => {
+    if (!isLoading && isAuthenticated && role) {
+      if (role === 'ADMIN') {
+        navigate('/admin', { replace: true });
+      } else if (role === 'OFFICER') {
+        navigate('/officer', { replace: true });
+      } else {
+        navigate('/citizen', { replace: true });
+      }
+    }
+  }, [isAuthenticated, role, isLoading, navigate]);
+
+  if (isLoading || isAuthenticated) {
+    return null;
+  }
 
   // Interactive Tax Calculator Preview State
   const [calcCategory, setCalcCategory] = useState<'RESIDENTIAL' | 'COMMERCIAL' | 'INDUSTRIAL'>('RESIDENTIAL');

@@ -16,21 +16,22 @@ public with sharing class CivicTaxDashboardService {
     }
 
     /**
-     * @description Computes live municipal KPI metrics directly from Salesforce records
+     * @description Computes live municipal KPI metrics directly from Salesforce records (Officer / Admin Only)
      */
     public static DashboardMetrics getExecutiveMetrics() {
+        CivicTaxSecurityService.requireCanViewExecutiveDashboard();
+
         DashboardMetrics metrics = new DashboardMetrics();
 
         // Property aggregates
-        metrics.totalProperties = [SELECT count() FROM Property__c WITH SECURITY_ENFORCED];
-        metrics.verifiedProperties = [SELECT count() FROM Property__c WHERE Verification_Status__c = 'Verified' WITH SECURITY_ENFORCED];
-        metrics.pendingVerifications = [SELECT count() FROM Property__c WHERE Verification_Status__c = 'Pending' WITH SECURITY_ENFORCED];
+        metrics.totalProperties = [SELECT count() FROM Property__c];
+        metrics.verifiedProperties = [SELECT count() FROM Property__c WHERE Verification_Status__c = 'VERIFIED' OR Verification_Status__c = 'Verified'];
+        metrics.pendingVerifications = [SELECT count() FROM Property__c WHERE Verification_Status__c = 'PENDING' OR Verification_Status__c = 'Pending'];
 
         // Financial aggregates
         AggregateResult[] assessmentAgg = [
             SELECT SUM(Total_Amount__c) totalAssessed, SUM(Amount_Paid__c) totalPaid, SUM(Outstanding_Amount__c) totalDue 
-            FROM Tax_Assessment__c 
-            WITH SECURITY_ENFORCED
+            FROM Tax_Assessment__c
         ];
 
         metrics.totalTaxAssessed = 0.0;
@@ -51,7 +52,7 @@ public with sharing class CivicTaxDashboardService {
         }
 
         // Grievances
-        metrics.openGrievances = [SELECT count() FROM Grievance__c WHERE Status__c = 'Open' WITH SECURITY_ENFORCED];
+        metrics.openGrievances = [SELECT count() FROM Grievance__c WHERE Status__c = 'OPEN' OR Status__c = 'Open'];
 
         return metrics;
     }

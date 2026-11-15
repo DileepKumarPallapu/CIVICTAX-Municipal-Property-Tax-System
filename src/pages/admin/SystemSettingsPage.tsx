@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { PageHeader } from '../../components/common/PageHeader';
 import { useToast } from '../../context/ToastContext';
 import { useAuth } from '../../context/AuthContext';
@@ -10,12 +11,15 @@ import {
   Layers,
   Cloud,
   ShieldAlert,
-  RotateCcw
+  RotateCcw,
+  ExternalLink,
+  ArrowRight
 } from 'lucide-react';
 
 export const SystemSettingsPage: React.FC = () => {
   const { currentUser } = useAuth();
   const { toast, success, info } = useToast();
+  const navigate = useNavigate();
 
   // Settings State
   const [municipalityName, setMunicipalityName] = useState('Central Municipal Corporation of Delhi');
@@ -30,8 +34,8 @@ export const SystemSettingsPage: React.FC = () => {
   const [smsAlerts, setSmsAlerts] = useState(true);
 
   // Salesforce Bridge Simulation Settings
-  const [salesforceOrgId, setSalesforceOrgId] = useState('00D5g000004XYZdemo');
-  const [salesforceEndpoint, setSalesforceEndpoint] = useState('https://civictax-demo.my.salesforce.com/services/apexrest/civic');
+  const [salesforceOrgId, setSalesforceOrgId] = useState('00Dfj00000oPoePEAS');
+  const [salesforceEndpoint, setSalesforceEndpoint] = useState('https://orgfarm-6061cf0a7d-dev-ed.develop.my.salesforce.com/services/apexrest/civictax/v1');
 
   // Reset confirmation state
   const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
@@ -287,18 +291,32 @@ export const SystemSettingsPage: React.FC = () => {
             </div>
           </div>
 
-          <div className="p-4 bg-sky-50/50 dark:bg-sky-950/20 border border-sky-100 dark:border-sky-900/40 rounded-xl flex items-center justify-between">
+          <div className="p-4 bg-sky-50/50 dark:bg-sky-950/20 border border-sky-100 dark:border-sky-900/40 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div>
-              <p className="text-sm font-semibold text-sky-900 dark:text-sky-200">Active Service Adapter: <span className="font-mono text-xs bg-sky-100 dark:bg-sky-900/60 px-2 py-0.5 rounded">LocalServiceFactory (Demo Persistence)</span></p>
-              <p className="text-xs text-sky-700 dark:text-sky-400 mt-0.5">Toggle adapter in serviceFactory.ts once Apex credentials and Connected App OAuth are issued.</p>
+              <p className="text-sm font-semibold text-sky-900 dark:text-sky-200">
+                Active Service Adapter: <span className="font-mono text-xs bg-sky-100 dark:bg-sky-900/60 px-2 py-0.5 rounded">LocalServiceFactory (Demo Persistence)</span>
+              </p>
+              <p className="text-xs text-sky-700 dark:text-sky-400 mt-0.5">
+                For live Trailhead Playground OAuth 2.0 PKCE authentication and Apex REST synchronization, use the dedicated Salesforce Gateway.
+              </p>
             </div>
-            <button
-              type="button"
-              onClick={() => info('Connection Test', 'Salesforce mock ping succeeded! Handshake payload verified.')}
-              className="px-4 py-2 bg-white dark:bg-slate-800 text-sky-600 dark:text-sky-400 border border-sky-200 dark:border-sky-800 rounded-xl text-sm font-medium hover:bg-sky-50 dark:hover:bg-slate-700 transition-colors shadow-sm"
-            >
-              Test Mock Ping
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => navigate('/admin/salesforce')}
+                className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-semibold transition-colors shadow-sm cursor-pointer"
+              >
+                Open Salesforce Gateway
+                <ArrowRight className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => info('Connection Test', 'Salesforce mock ping succeeded! Handshake payload verified.')}
+                className="px-3 py-2 bg-white dark:bg-slate-800 text-sky-600 dark:text-sky-400 border border-sky-200 dark:border-sky-800 rounded-xl text-xs font-medium hover:bg-sky-50 dark:hover:bg-slate-700 transition-colors shadow-sm"
+              >
+                Test Mock Ping
+              </button>
+            </div>
           </div>
         </div>
 

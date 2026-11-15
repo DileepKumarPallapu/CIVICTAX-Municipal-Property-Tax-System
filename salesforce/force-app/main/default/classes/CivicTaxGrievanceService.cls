@@ -1,29 +1,37 @@
 /**
  * @description Enterprise Service for Citizen Grievance Intake, Routing, and SLA Resolution
- * @group CivicTax 6.0
+ * @group CivicTax 6.0 & 10.0
  */
 public with sharing class CivicTaxGrievanceService {
 
     public class GrievanceException extends Exception {}
 
     /**
-     * @description Creates a new grievance docket
+     * @description Creates a new grievance docket with ownership validation and CRUD enforcement
      */
     public static Grievance__c submitGrievance(Id propertyId, String subject, String description, String priority) {
+        if (!CivicTaxSecurityService.canCreateObject('Grievance__c')) {
+            throw new CivicTaxSecurityService.SecurityException('Access Denied: Insufficient permissions to create Grievance records.');
+        }
+
         if (String.isBlank(subject) || String.isBlank(description)) {
             throw new GrievanceException('Subject and description are mandatory for grievance filing.');
+        }
+
+        // BOLA / IDOR Protection: Citizens can only file grievances against properties they own or have access to
+        if (propertyId != null) {
+            CivicTaxSecurityService.requireCanAccessProperty(propertyId);
         }
 
         Grievance__c grv = new Grievance__c();
         grv.Property__c = propertyId;
         grv.Subject__c = subject;
         grv.Description__c = description;
-        grv.Priority__c = String.isNotBlank(priority) ? priority : 'Medium';
-        grv.Status__c = 'Open';
+        grv.Priority__c = String.isNotBlank(priority) ? priority.toUpperCase() : 'MEDIUM';
+        grv.Status__c = 'OPEN';
 
-        SObjectAccessDecision decision = Security.stripInaccessible(AccessType.CREATABLE, new List<Grievance__c>{ grv });
-        insert decision.getRecords();
-        return (Grievance__c) decision.getRecords()[0];
+        insert grv;
+        return grv;
     }
 
     /**
@@ -37,24 +45,38 @@ public with sharing class CivicTaxGrievanceService {
             throw new GrievanceException('Mandatory resolution comments must be provided.');
         }
 
-        List<Grievance__c> grievances = [
-            SELECT Id, Status__c, Resolution_Comments__c 
-            FROM Grievance__c 
-            WHERE Id = :grievanceId 
-            WITH SECURITY_ENFORCED 
-            LIMIT 1
-        ];
+        // Enforce Grievance Officer or Administrator authorization
+        CivicTaxSecurityService.requireCanResolveGrievance();
 
-        if (grievances.isEmpty()) {
-            throw new GrievanceException('Grievance not found');
+        if (!CivicTaxSecurityService.canUpdateObject('Grievance__c')) {
+            throw new CivicTaxSecurityService.SecurityException('Access Denied: Insufficient permissions to update Grievance records.');
         }
 
-        Grievance__c grv = grievances[0];
-        grv.Status__c = 'Resolved';
-        grv.Resolution_Comments__c = resolutionComments;
+        return new SystemElevatedContext().executeResolveGrievance(grievanceId, resolutionComments);
+    }
 
-        SObjectAccessDecision decision = Security.stripInaccessible(AccessType.UPDATABLE, new List<Grievance__c>{ grv });
-        update decision.getRecords();
-        return (Grievance__c) decision.getRecords()[0];
+    /**
+     * @description Dedicated elevated execution context for authorized municipal officer resolution
+     */
+    private without sharing class SystemElevatedContext {
+        public Grievance__c executeResolveGrievance(Id grievanceId, String resolutionComments) {
+            List<Grievance__c> grievances = [
+                SELECT Id, Status__c, Resolution_Comments__c 
+                FROM Grievance__c 
+                WHERE Id = :grievanceId 
+                LIMIT 1
+            ];
+
+            if (grievances.isEmpty()) {
+                throw new GrievanceException('Grievance not found');
+            }
+
+            Grievance__c grv = grievances[0];
+            grv.Status__c = 'RESOLVED';
+            grv.Resolution_Comments__c = resolutionComments;
+
+            update grv;
+            return grv;
+        }
     }
 }

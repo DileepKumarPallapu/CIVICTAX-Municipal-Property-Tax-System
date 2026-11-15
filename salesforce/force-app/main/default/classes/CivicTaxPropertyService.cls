@@ -1,15 +1,19 @@
 /**
  * @description Enterprise Service for Property Registration, Verification, and Zonal Inquiries
- * @group CivicTax 6.0
+ * @group CivicTax 6.0 & 10.0
  */
 public with sharing class CivicTaxPropertyService {
     
     public class PropertyServiceException extends Exception {}
 
     /**
-     * @description Registers a new property with duplicate validation and plot boundary guards
+     * @description Registers a new property with duplicate validation and CRUD guards
      */
     public static Property__c registerProperty(Property__c prop) {
+        if (!CivicTaxSecurityService.canCreateObject('Property__c')) {
+            throw new CivicTaxSecurityService.SecurityException('Access Denied: Insufficient permissions to register Property.');
+        }
+
         if (prop == null) {
             throw new PropertyServiceException('Property record cannot be null');
         }
@@ -25,66 +29,90 @@ public with sharing class CivicTaxPropertyService {
             SELECT Id, Property_Number__c 
             FROM Property__c 
             WHERE Property_Number__c = :prop.Property_Number__c 
-            WITH SECURITY_ENFORCED 
             LIMIT 1
         ];
         if (!existing.isEmpty()) {
             throw new PropertyServiceException('Property Number ' + prop.Property_Number__c + ' is already registered.');
         }
 
-        prop.Verification_Status__c = 'Pending';
+        prop.Verification_Status__c = 'PENDING';
         prop.Registration_Status__c = 'Submitted';
         
-        SObjectAccessDecision decision = Security.stripInaccessible(AccessType.CREATABLE, new List<Property__c>{ prop });
-        insert decision.getRecords();
-        return (Property__c) decision.getRecords()[0];
+        insert prop;
+        return prop;
     }
 
     /**
-     * @description Bulk updates verification status with surveyor notes
+     * @description Bulk updates verification status with surveyor notes (Officer / Admin Only)
      */
     public static List<Property__c> updateVerificationStatus(Map<Id, String> propertyStatusMap) {
         if (propertyStatusMap == null || propertyStatusMap.isEmpty()) {
             return new List<Property__c>();
         }
 
-        Set<Id> propIds = propertyStatusMap.keySet();
-        List<Property__c> properties = [
-            SELECT Id, Verification_Status__c, Registration_Status__c 
-            FROM Property__c 
-            WHERE Id IN :propIds 
-            WITH SECURITY_ENFORCED
-        ];
+        CivicTaxSecurityService.requireCanVerifyProperty();
 
-        for (Property__c p : properties) {
-            String newStatus = propertyStatusMap.get(p.Id);
-            p.Verification_Status__c = newStatus;
-            if (newStatus == 'Verified') {
-                p.Registration_Status__c = 'Active';
-            } else if (newStatus == 'Rejected') {
-                p.Registration_Status__c = 'Rejected';
-            }
+        if (!CivicTaxSecurityService.canUpdateObject('Property__c')) {
+            throw new CivicTaxSecurityService.SecurityException('Access Denied: Insufficient permissions to update Property verification.');
         }
 
-        SObjectAccessDecision decision = Security.stripInaccessible(AccessType.UPDATABLE, properties);
-        update decision.getRecords();
-        return (List<Property__c>) decision.getRecords();
+        return new SystemElevatedContext().executeUpdateVerification(propertyStatusMap);
     }
 
     /**
-     * @description Queries properties filtered by municipal zone and category
+     * @description Queries properties filtered by municipal zone and category with user isolation
      */
     public static List<Property__c> getPropertiesByFilter(String zone, String category) {
-        String query = 'SELECT Id, Name, Property_Number__c, Property_Address__c, Zone__c, Property_Category__c, Built_Up_Area__c, Verification_Status__c, Registration_Status__c FROM Property__c WHERE Id != null';
+        String query = 'SELECT Id, Name, Property_Number__c, Property_Address__c, Zone__c, Property_Category__c, Built_Up_Area__c, Verification_Status__c, Registration_Status__c, OwnerId, Property_Owner__c FROM Property__c WHERE Id != null';
         
+        // Non-officer/citizen accounts can only see their own properties
+        if (!CivicTaxSecurityService.isOfficerOrAdmin()) {
+            Id currentUserId = UserInfo.getUserId();
+            String currentUserEmail = UserInfo.getUserEmail();
+            query += ' AND (OwnerId = :currentUserId OR Property_Owner__r.Email = :currentUserEmail)';
+        }
+
         if (String.isNotBlank(zone)) {
             query += ' AND Zone__c = :zone';
         }
         if (String.isNotBlank(category)) {
             query += ' AND Property_Category__c = :category';
         }
-        query += ' WITH SECURITY_ENFORCED ORDER BY CreatedDate DESC LIMIT 100';
+        query += ' ORDER BY CreatedDate DESC LIMIT 100';
 
-        return Database.query(query);
+        List<Property__c> props = Database.query(query);
+        return (List<Property__c>) CivicTaxSecurityService.sanitizeRecords(AccessType.READABLE, props);
+    }
+
+    /**
+     * @description Dedicated elevated execution context for authorized municipal officer property verification
+     */
+    private without sharing class SystemElevatedContext {
+        public List<Property__c> executeUpdateVerification(Map<Id, String> propertyStatusMap) {
+            Set<Id> propIds = propertyStatusMap.keySet();
+            List<Property__c> properties = [
+                SELECT Id, Verification_Status__c, Registration_Status__c 
+                FROM Property__c 
+                WHERE Id IN :propIds
+            ];
+
+            for (Property__c p : properties) {
+                String newStatus = propertyStatusMap.get(p.Id);
+                if (newStatus != null) {
+                    if (newStatus.equalsIgnoreCase('Verified')) {
+                        p.Verification_Status__c = 'VERIFIED';
+                        p.Registration_Status__c = 'Active';
+                    } else if (newStatus.equalsIgnoreCase('Rejected')) {
+                        p.Verification_Status__c = 'REJECTED';
+                        p.Registration_Status__c = 'Rejected';
+                    } else {
+                        p.Verification_Status__c = newStatus.toUpperCase();
+                    }
+                }
+            }
+
+            update properties;
+            return properties;
+        }
     }
 }

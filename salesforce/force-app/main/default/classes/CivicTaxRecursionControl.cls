@@ -3,6 +3,10 @@
  * Prevents infinite trigger re-entry while remaining 100% bulk-safe across 200-record batches.
  */
 public class CivicTaxRecursionControl {
+    public static Boolean isAssessmentTriggerRunning = false;
+    public static Boolean isPaymentTriggerRunning = false;
+    public static Boolean isPropertyTriggerRunning = false;
+
     private static Set<Id> processedAssessmentIds = new Set<Id>();
     private static Set<Id> processedPaymentIds = new Set<Id>();
     private static Set<Id> processedPropertyIds = new Set<Id>();
@@ -37,10 +41,17 @@ public class CivicTaxRecursionControl {
         }
     }
 
-    @TestVisible
-    public static void reset() {
+    public static void resetAll() {
+        isAssessmentTriggerRunning = false;
+        isPaymentTriggerRunning = false;
+        isPropertyTriggerRunning = false;
         processedAssessmentIds.clear();
         processedPaymentIds.clear();
         processedPropertyIds.clear();
+    }
+
+    @TestVisible
+    public static void reset() {
+        resetAll();
     }
 }

@@ -1,3 +1,10 @@
+export interface CivicTaxSessionUser {
+  id: string;
+  email: string;
+  role: 'CITIZEN' | 'OFFICER' | 'ADMIN';
+  name: string;
+}
+
 export interface SalesforceOAuthTokenResponse {
   access_token: string;
   refresh_token?: string;

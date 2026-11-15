@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { PublicLayout } from '../layouts/PublicLayout';
 import { DashboardLayout } from '../layouts/DashboardLayout';
 import { ProtectedRoute } from './ProtectedRoute';
+import { useAuth } from '../context/AuthContext';
 
 // Public Pages
 import { LandingPage } from '../pages/public/LandingPage';
@@ -57,6 +58,18 @@ import { RevenueForecastingPage } from '../features/forecasting/RevenueForecasti
 import { PublicTransparencyPage } from '../features/transparency/PublicTransparencyPage';
 import { SalesforceSettingsPage } from '../features/salesforce/SalesforceSettingsPage';
 import { AcademicEvidenceCenter } from '../features/evidence/AcademicEvidenceCenter';
+import { FacultyDemoGuidePage } from '../pages/admin/FacultyDemoGuidePage';
+
+const RootCatchAllRedirect: React.FC = () => {
+  const { isAuthenticated, role, isLoading } = useAuth();
+  if (isLoading) return null;
+  if (isAuthenticated && role) {
+    if (role === 'ADMIN') return <Navigate to="/admin" replace />;
+    if (role === 'OFFICER') return <Navigate to="/officer" replace />;
+    return <Navigate to="/citizen" replace />;
+  }
+  return <Navigate to="/" replace />;
+};
 
 export const AppRoutes: React.FC = () => {
   return (
@@ -90,6 +103,7 @@ export const AppRoutes: React.FC = () => {
         <Route path="reassessments" element={<CitizenReassessmentsPage />} />
         <Route path="notifications" element={<CitizenNotificationsPage />} />
         <Route path="profile" element={<CitizenProfilePage />} />
+        <Route path="demo-guide" element={<FacultyDemoGuidePage />} />
       </Route>
 
       {/* Municipal Officer Portal */}
@@ -113,6 +127,7 @@ export const AppRoutes: React.FC = () => {
         <Route path="recovery" element={<RevenueRecoveryPage />} />
         <Route path="compliance" element={<ComplianceCenterPage />} />
         <Route path="profile" element={<OfficerProfilePage />} />
+        <Route path="demo-guide" element={<FacultyDemoGuidePage />} />
       </Route>
 
       {/* Administrator Portal */}
@@ -141,12 +156,18 @@ export const AppRoutes: React.FC = () => {
         <Route path="reports" element={<AdminReportsPage />} />
         <Route path="salesforce" element={<SalesforceSettingsPage />} />
         <Route path="evidence" element={<AcademicEvidenceCenter />} />
+        <Route path="demo-guide" element={<FacultyDemoGuidePage />} />
         <Route path="audit" element={<AuditTrailPage />} />
         <Route path="settings" element={<SystemSettingsPage />} />
       </Route>
 
+      {/* Direct Route Aliases for Legacy or Dashboard URLs */}
+      <Route path="/admin/dashboard" element={<Navigate to="/admin" replace />} />
+      <Route path="/officer/dashboard" element={<Navigate to="/officer" replace />} />
+      <Route path="/citizen/dashboard" element={<Navigate to="/citizen" replace />} />
+
       {/* Catch-all redirect */}
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="*" element={<RootCatchAllRedirect />} />
     </Routes>
   );
 };

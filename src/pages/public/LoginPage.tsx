@@ -11,9 +11,22 @@ export const LoginPage: React.FC = () => {
   const [errorMessage, setErrorMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const { login } = useAuth();
+  const { login, isAuthenticated, role, isLoading } = useAuth();
   const { success, error: toastError } = useToast();
   const navigate = useNavigate();
+
+  // If already authenticated, redirect to the user's role-based dashboard
+  React.useEffect(() => {
+    if (!isLoading && isAuthenticated && role) {
+      if (role === 'ADMIN') {
+        navigate('/admin', { replace: true });
+      } else if (role === 'OFFICER') {
+        navigate('/officer', { replace: true });
+      } else {
+        navigate('/citizen', { replace: true });
+      }
+    }
+  }, [isAuthenticated, role, isLoading, navigate]);
 
   const handleLogin = async (e?: React.FormEvent, customEmail?: string, customPassword?: string) => {
     if (e) e.preventDefault();
@@ -28,11 +41,11 @@ export const LoginPage: React.FC = () => {
       success('Authentication Successful', `Welcome back, ${user.name}!`);
 
       if (user.role === 'ADMIN') {
-        navigate('/admin/dashboard');
+        navigate('/admin', { replace: true });
       } else if (user.role === 'OFFICER') {
-        navigate('/officer/dashboard');
+        navigate('/officer', { replace: true });
       } else {
-        navigate('/citizen/dashboard');
+        navigate('/citizen', { replace: true });
       }
     } catch (err: any) {
       const msg = err.message || 'Login failed. Please verify credentials.';

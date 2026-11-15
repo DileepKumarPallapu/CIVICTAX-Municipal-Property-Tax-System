@@ -20,5 +20,5 @@
         <type>Text</type>
     </nameField>
     <pluralLabel>Tax Assessments</pluralLabel>
-    <sharingModel>ReadWrite</sharingModel>
+    <sharingModel>Private</sharingModel>
 </CustomObject>

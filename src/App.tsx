@@ -7,7 +7,6 @@ import { NotificationProvider } from './context/NotificationContext';
 import { AppRoutes } from './routes/AppRoutes';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
 import { CiviAssist } from './components/common/CiviAssist';
-import { FacultyDemoMode } from './components/common/FacultyDemoMode';
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -75,9 +74,8 @@ export const App: React.FC = () => {
             <NotificationProvider>
               <BrowserRouter>
                 <AppRoutes />
-                {/* CivicTax 5.0 Global Assist & Evaluation Mode */}
+                {/* CivicTax 5.0 Global Assist */}
                 <CiviAssist />
-                <FacultyDemoMode />
               </BrowserRouter>
             </NotificationProvider>
           </AuthProvider>

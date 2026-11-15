@@ -1,5 +1,5 @@
 // PaymentService.cls
-// CivicTax 8.0 Authoritative Apex Payment Processing Service
+// CivicTax 8.0 & 10.0 Authoritative Apex Payment Processing Service
 public with sharing class PaymentService {
     public class PaymentException extends Exception {}
 
@@ -10,6 +10,10 @@ public with sharing class PaymentService {
         String paymentMethod,
         String transactionId
     ) {
+        if (!CivicTaxSecurityService.canCreateObject('Tax_Payment__c')) {
+            throw new CivicTaxSecurityService.SecurityException('Access Denied: Insufficient permissions to create Payment records.');
+        }
+
         if (amount == null || amount <= 0) {
             throw new PaymentException('Payment amount must be greater than zero.');
         }
@@ -17,12 +21,16 @@ public with sharing class PaymentService {
             throw new PaymentException('Transaction reference ID is mandatory.');
         }
 
+        // BOLA / IDOR Protection: Validate caller has access to the target assessment
+        if (String.isNotBlank(assessmentId)) {
+            CivicTaxSecurityService.requireCanAccessAssessment((Id) assessmentId);
+        }
+
         // Duplicate payment transaction protection
         List<Tax_Payment__c> duplicateCheck = [
             SELECT Id, Transaction_ID__c 
             FROM Tax_Payment__c 
             WHERE Transaction_ID__c = :transactionId 
-            WITH USER_MODE 
             LIMIT 1
         ];
         if (!duplicateCheck.isEmpty()) {
@@ -34,7 +42,6 @@ public with sharing class PaymentService {
             SELECT Id, Name, Total_Amount__c, Amount_Paid__c, Outstanding_Amount__c, Assessment_Status__c 
             FROM Tax_Assessment__c 
             WHERE Id = :assessmentId 
-            WITH USER_MODE 
             FOR UPDATE
         ];
         if (assessments.isEmpty()) {
@@ -59,7 +66,7 @@ public with sharing class PaymentService {
             Transaction_ID__c = transactionId,
             Payment_Status__c = 'SUCCESS'
         );
-        insert as user payment;
+        insert payment;
 
         // Recalculate Assessment
         Decimal newPaid = (currentPaid + amount).setScale(2, System.RoundingMode.HALF_UP);
@@ -73,7 +80,7 @@ public with sharing class PaymentService {
             asm.Assessment_Status__c = 'PARTIALLY_PAID';
         }
 
-        update as user asm;
+        update asm;
         return payment;
     }
 }

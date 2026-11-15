@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import { Menu, X, ArrowRight, Shield } from 'lucide-react';
 import { ThemeToggle } from '../components/common/ThemeToggle';
+import { AppFooter } from '../components/common/AppFooter';
 import { useAuth } from '../context/AuthContext';
 
 export const PublicLayout: React.FC = () => {
@@ -10,9 +11,9 @@ export const PublicLayout: React.FC = () => {
   const location = useLocation();
 
   const getDashboardPath = () => {
-    if (role === 'ADMIN') return '/admin/dashboard';
-    if (role === 'OFFICER') return '/officer/dashboard';
-    return '/citizen/dashboard';
+    if (role === 'ADMIN') return '/admin';
+    if (role === 'OFFICER') return '/officer';
+    return '/citizen';
   };
 
   const navLinks = [
@@ -156,84 +157,8 @@ export const PublicLayout: React.FC = () => {
         <Outlet />
       </main>
 
-      {/* Professional Footer */}
-      <footer className="bg-[#14243A] text-slate-300 pt-16 pb-12 border-t border-slate-800">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-10">
-            {/* Col 1 */}
-            <div className="space-y-4">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center font-black text-base">
-                  CT
-                </div>
-                <span className="text-xl font-extrabold text-white tracking-tight">
-                  CIVICTAX
-                </span>
-              </div>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                Smart Property Tax Management. Transparent. Efficient. Accessible. Built for municipal governance and citizen empowerment.
-              </p>
-              <div className="text-[11px] text-teal-400 font-semibold">
-                Academic Demonstration Project • Municipal E-Governance
-              </div>
-            </div>
-
-            {/* Col 2 */}
-            <div>
-              <h4 className="text-xs font-bold text-white uppercase tracking-wider mb-4">
-                Citizen Services
-              </h4>
-              <ul className="space-y-2 text-xs text-slate-400">
-                <li><Link to="/citizen/register-property" className="hover:text-white transition">Property Registration</Link></li>
-                <li><Link to="/citizen/assessments" className="hover:text-white transition">Annual Tax Assessments</Link></li>
-                <li><Link to="/citizen/payments" className="hover:text-white transition">Online Tax Payment</Link></li>
-                <li><Link to="/citizen/reassessments" className="hover:text-white transition">Reassessment Filing</Link></li>
-                <li><Link to="/citizen/grievances" className="hover:text-white transition">Grievance Redressal</Link></li>
-              </ul>
-            </div>
-
-            {/* Col 3 */}
-            <div>
-              <h4 className="text-xs font-bold text-white uppercase tracking-wider mb-4">
-                Portals & Access
-              </h4>
-              <ul className="space-y-2 text-xs text-slate-400">
-                <li><Link to="/login" className="hover:text-white transition">Citizen Portal Login</Link></li>
-                <li><Link to="/login" className="hover:text-white transition">Municipal Officer Desk</Link></li>
-                <li><Link to="/login" className="hover:text-white transition">Administrator Console</Link></li>
-                <li><Link to="/about" className="hover:text-white transition">About Municipal Corporation</Link></li>
-                <li><Link to="/contact" className="hover:text-white transition">Helpdesk & Support</Link></li>
-              </ul>
-            </div>
-
-            {/* Col 4 */}
-            <div>
-              <h4 className="text-xs font-bold text-white uppercase tracking-wider mb-4">
-                Municipal Helpdesk
-              </h4>
-              <p className="text-xs text-slate-400 mb-2">
-                Toll Free Tax Helpline: 1800-233-CIVIC (1800-233-24842)
-              </p>
-              <p className="text-xs text-slate-400 mb-2">
-                Email: support@civictax.demo
-              </p>
-              <p className="text-xs text-slate-400">
-                Civic Center, Revenue Division, Municipal Corporation Headquarters
-              </p>
-            </div>
-          </div>
-
-          <div className="mt-12 pt-8 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between text-xs text-slate-500 gap-4">
-            <p>© {new Date().getFullYear()} CivicTax Municipal Corporation. All rights reserved. Academic Project.</p>
-            <div className="flex gap-6">
-              <span>Privacy Policy</span>
-              <span>Terms of Service</span>
-              <span>RTI Portal</span>
-              <span>Citizen Charter</span>
-            </div>
-          </div>
-        </div>
-      </footer>
+      {/* Professional Enterprise Footer */}
+      <AppFooter />
     </div>
   );
 };
