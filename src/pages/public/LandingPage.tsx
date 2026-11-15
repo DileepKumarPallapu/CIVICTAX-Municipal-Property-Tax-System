@@ -41,6 +41,11 @@ export const LandingPage: React.FC = () => {
   const [openFaq, setOpenFaq] = useState<number | null>(0);
   const [contactForm, setContactForm] = useState({ name: '', email: '', phone: '', query: '' });
 
+  // Interactive Tax Calculator Preview State
+  const [calcCategory, setCalcCategory] = useState<'RESIDENTIAL' | 'COMMERCIAL' | 'INDUSTRIAL'>('RESIDENTIAL');
+  const [calcArea, setCalcArea] = useState<number>(1200);
+  const [calcRate, setCalcRate] = useState<number>(10);
+
   // Prevent landing page flash and redirect authenticated users directly to their dashboard
   useEffect(() => {
     if (!isLoading && isAuthenticated && role) {
@@ -53,15 +58,6 @@ export const LandingPage: React.FC = () => {
       }
     }
   }, [isAuthenticated, role, isLoading, navigate]);
-
-  if (isLoading || isAuthenticated) {
-    return null;
-  }
-
-  // Interactive Tax Calculator Preview State
-  const [calcCategory, setCalcCategory] = useState<'RESIDENTIAL' | 'COMMERCIAL' | 'INDUSTRIAL'>('RESIDENTIAL');
-  const [calcArea, setCalcArea] = useState<number>(1200);
-  const [calcRate, setCalcRate] = useState<number>(10);
 
   const calculatedPreview = calculateTax({
     builtUpArea: calcArea,
@@ -151,6 +147,10 @@ export const LandingPage: React.FC = () => {
       a: 'Yes. CivicTax is architected with a decoupled Service Factory pattern. The current LocalStorage demo adapter can be switched directly to the included SalesforceServiceAdapter to synchronize records with Salesforce Custom Objects (Property__c, Tax_Assessment__c) via Apex REST APIs.',
     },
   ];
+
+  if (isLoading || isAuthenticated) {
+    return null;
+  }
 
   return (
     <div className="space-y-24 pb-20 overflow-hidden">
