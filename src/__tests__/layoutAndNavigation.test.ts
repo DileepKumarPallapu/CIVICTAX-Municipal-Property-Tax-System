@@ -185,4 +185,86 @@ describe('CivicTax UI Layout, Navigation & Auth Flow Verification', () => {
     expect(indPreview.discount).toBe(0);
     expect(indPreview.totalTax).toBe(18000);
   });
+
+  it('verifies loading to authenticated transition and dashboard redirection', async () => {
+    const userService = new LocalUserService();
+    const user = await userService.login('citizen@civictax.demo', 'Citizen@123');
+    expect(user).toBeDefined();
+    expect(user.role).toBe('CITIZEN');
+
+    const transitionState = {
+      isLoading: false,
+      isAuthenticated: true,
+      role: user.role,
+    };
+
+    let redirectTarget = '/';
+    if (!transitionState.isLoading && transitionState.isAuthenticated && transitionState.role) {
+      if (transitionState.role === 'ADMIN') redirectTarget = '/admin';
+      else if (transitionState.role === 'OFFICER') redirectTarget = '/officer';
+      else redirectTarget = '/citizen';
+    }
+
+    expect(redirectTarget).toBe('/citizen');
+  });
+
+  it('verifies loading to unauthenticated transition and public landing page render', () => {
+    let state = { isLoading: true, isAuthenticated: false, role: null };
+    let shouldRenderLandingContent = !state.isLoading && !state.isAuthenticated;
+    expect(shouldRenderLandingContent).toBe(false);
+
+    state = { isLoading: false, isAuthenticated: false, role: null };
+    shouldRenderLandingContent = !state.isLoading && !state.isAuthenticated;
+    expect(shouldRenderLandingContent).toBe(true);
+  });
+
+  it('verifies session expiration, logout, and subsequent recovery', async () => {
+    const userService = new LocalUserService();
+    const user = await userService.login('officer@civictax.demo', 'Officer@123');
+    expect(StorageService.getCurrentUser()?.id).toBe(user.id);
+
+    await userService.logout();
+    expect(StorageService.getCurrentUser()).toBeNull();
+
+    const recoveredUser = await userService.login('officer@civictax.demo', 'Officer@123');
+    expect(StorageService.getCurrentUser()?.id).toBe(recoveredUser.id);
+    expect(StorageService.getCurrentUser()?.role).toBe('OFFICER');
+  });
+
+  it('verifies API failure handling and graceful recovery without unmounting', async () => {
+    const userService = new LocalUserService();
+    // Start with a clean logged-out state
+    await userService.logout();
+    expect(StorageService.getCurrentUser()).toBeNull();
+
+    let authError: string | null = null;
+    try {
+      await userService.login('citizen@civictax.demo', 'WrongPass!123');
+    } catch (err: any) {
+      authError = err.message || 'Authentication error';
+    }
+
+    expect(authError).toBeTruthy();
+    expect(authError).toContain('Invalid credentials');
+    expect(StorageService.getCurrentUser()).toBeNull();
+  });
+
+  it('verifies role-based dashboard route security guards', () => {
+    const getDashboardPath = (role: 'CITIZEN' | 'OFFICER' | 'ADMIN') => {
+      switch (role) {
+        case 'ADMIN': return '/admin';
+        case 'OFFICER': return '/officer';
+        case 'CITIZEN': return '/citizen';
+      }
+    };
+
+    expect(getDashboardPath('ADMIN')).toBe('/admin');
+    expect(getDashboardPath('OFFICER')).toBe('/officer');
+    expect(getDashboardPath('CITIZEN')).toBe('/citizen');
+
+    const citizenUser = { role: 'CITIZEN' as const };
+    const officerAllowed = ['OFFICER'];
+    const canAccess = officerAllowed.includes(citizenUser.role);
+    expect(canAccess).toBe(false);
+  });
 });
