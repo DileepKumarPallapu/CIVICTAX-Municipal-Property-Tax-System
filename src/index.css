@@ -78,4 +78,17 @@
     background: #ffffff !important;
     color: #000000 !important;
   }
+  .receipt-modal-backdrop {
+    position: static !important;
+    background: #ffffff !important;
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+  .receipt-modal-card {
+    box-shadow: none !important;
+    border: none !important;
+    max-width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
 }

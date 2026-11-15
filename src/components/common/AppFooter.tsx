@@ -173,6 +173,15 @@ export const AppFooter: React.FC<AppFooterProps> = ({ isDashboard = false }) => 
                     Public Transparency Portal
                   </Link>
                 </li>
+                <li>
+                  <Link
+                    to="/verify-receipt"
+                    className="text-slate-400 hover:text-emerald-400 transition-colors duration-150 inline-flex items-center gap-1.5 group"
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-slate-600 group-hover:bg-emerald-400 transition-colors"></span>
+                    Verify Payment Receipt
+                  </Link>
+                </li>
               </ul>
             </div>
           </div>

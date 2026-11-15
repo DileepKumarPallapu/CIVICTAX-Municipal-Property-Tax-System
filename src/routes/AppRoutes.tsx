@@ -12,6 +12,7 @@ import { ServicesPage } from '../pages/public/ServicesPage';
 import { ContactPage } from '../pages/public/ContactPage';
 import { LoginPage } from '../pages/public/LoginPage';
 import { DemoRegistrationPage } from '../pages/public/DemoRegistrationPage';
+import { ReceiptVerificationPage } from '../pages/public/ReceiptVerificationPage';
 
 // Citizen Pages
 import { CitizenDashboard } from '../pages/citizen/CitizenDashboard';
@@ -83,6 +84,8 @@ export const AppRoutes: React.FC = () => {
         <Route path="/transparency" element={<PublicTransparencyPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/demo-registration" element={<DemoRegistrationPage />} />
+        <Route path="/verify-receipt" element={<ReceiptVerificationPage />} />
+        <Route path="/verify-receipt/:receiptId" element={<ReceiptVerificationPage />} />
       </Route>
 
       {/* Citizen Portal */}
