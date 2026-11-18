@@ -52,16 +52,17 @@ export const RegisterPropertyPage: React.FC = () => {
     formState: { errors },
   } = useForm<PropertyFormData>({
     resolver: zodResolver(propertySchema),
-    defaultValues: {
-      ownerName: currentUser?.name || '',
-      ownerEmail: currentUser?.email || '',
-      ownerPhone: currentUser?.phone || '',
-      category: 'RESIDENTIAL',
-      zoneId: 'zone-1',
-      builtUpArea: 1000,
-      constructionYear: 2020,
+     defaultValues: {
+      ownerName: '',
+      ownerEmail: '',
+      ownerPhone: '',
+      category: undefined,
+      zoneId: '',
+      builtUpArea: undefined,
+      constructionYear: undefined,
+      address: '',
       documentReference: '',
-      contactDetails: `${currentUser?.email || ''} | ${currentUser?.phone || ''}`,
+      contactDetails: '',
       description: '',
     },
   });
@@ -194,6 +195,7 @@ export const RegisterPropertyPage: React.FC = () => {
                   {...register('category')}
                   className="w-full px-3.5 py-2.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-slate-900 dark:text-white font-semibold"
                 >
+                <option value="">Select property category</option>
                   <option value="RESIDENTIAL">Residential (₹10/sq.ft)</option>
                   <option value="COMMERCIAL">Commercial (₹18/sq.ft)</option>
                   <option value="INDUSTRIAL">Industrial (₹15/sq.ft)</option>
@@ -229,7 +231,7 @@ export const RegisterPropertyPage: React.FC = () => {
                 <input
                   type="number"
                   step="any"
-                  {...register('builtUpArea')}
+                  {...register('builtUpArea', { valueAsNumber: true })}
                   className="w-full px-3.5 py-2.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-slate-900 dark:text-white font-mono"
                 />
                 {errors.builtUpArea && (
@@ -243,7 +245,7 @@ export const RegisterPropertyPage: React.FC = () => {
                 </label>
                 <input
                   type="number"
-                  {...register('constructionYear')}
+                  {...register('constructionYear', { valueAsNumber: true })}
                   className="w-full px-3.5 py-2.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-slate-900 dark:text-white font-mono"
                 />
                 {errors.constructionYear && (

@@ -107,8 +107,10 @@ public with sharing class PropertyService {
     // List properties with optional filters and user isolation
     public static List<Property__c> listProperties(String category, String zone, String status) {
         String query = 'SELECT Id, Name, Property_Number__c, Property_Address__c, Property_Category__c, ' +
-                       'Built_Up_Area__c, Zone__c, Verification_Status__c, Registration_Date__c, Latitude__c, Longitude__c ' +
-                       'FROM Property__c ';
+               'Built_Up_Area__c, Zone__c, Municipal_Zone__c, Verification_Status__c, ' +
+               'Registration_Date__c, Latitude__c, Longitude__c, Property_Owner__c, ' +
+               'Property_Owner__r.Name, Property_Owner__r.Email ' +
+               'FROM Property__c ';
         List<String> conditions = new List<String>();
 
         // Enforce user isolation if not officer/admin

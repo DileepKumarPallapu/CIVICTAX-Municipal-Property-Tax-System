@@ -3,11 +3,13 @@
     <fullName>Property__c</fullName>
     <deleteConstraint>Restrict</deleteConstraint>
     <description>Associated municipal property parcel</description>
+    <externalId>false</externalId>
     <label>Property</label>
     <referenceTo>Property__c</referenceTo>
     <relationshipLabel>Tax Assessments</relationshipLabel>
     <relationshipName>Tax_Assessments</relationshipName>
     <required>true</required>
     <trackHistory>true</trackHistory>
+    <trackTrending>false</trackTrending>
     <type>Lookup</type>
 </CustomField>

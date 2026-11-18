@@ -4,7 +4,10 @@ import { BackendServiceFactory } from '../repositories/ServiceFactory.js';
 import { config } from '../config/index.js';
 
 export const municipalApiRouter = Router();
-const repo = BackendServiceFactory.getRepository();
+const getRequestRepository = (req: Request) =>
+  BackendServiceFactory.getRepository(req.session.salesforceSession);
+
+
 
 // 1. HEALTH & SYSTEM STATUS
 // GET /api/health
@@ -36,7 +39,7 @@ municipalApiRouter.get('/api/salesforce/health', (req: Request, res: Response) =
 municipalApiRouter.get('/api/properties', async (req: Request, res: Response) => {
   try {
     const { category, zone, status } = req.query;
-    const properties = await repo.listProperties({
+    const properties = await getRequestRepository(req).listProperties({
       category: category as string,
       zone: zone as string,
       status: status as any,
@@ -62,7 +65,7 @@ municipalApiRouter.post('/api/properties', async (req: Request, res: Response) =
       return;
     }
 
-    const created = await repo.createProperty({
+    const created = await getRequestRepository(req).createProperty({
       propertyNumber,
       ownerId: ownerId || 'usr-citizen-01',
       ownerName: ownerName || 'Rajesh Kumar Sharma',
@@ -86,7 +89,7 @@ municipalApiRouter.post('/api/properties', async (req: Request, res: Response) =
 // GET /api/properties/:id
 municipalApiRouter.get('/api/properties/:id', async (req: Request, res: Response) => {
   try {
-    const prop = await repo.getPropertyById(req.params.id);
+    const prop = await getRequestRepository(req).getPropertyById(req.params.id);
     if (!prop) {
       res.status(404).json({ success: false, error: 'Property not found' });
       return;
@@ -101,7 +104,7 @@ municipalApiRouter.get('/api/properties/:id', async (req: Request, res: Response
 municipalApiRouter.patch('/api/properties/:id/verify', async (req: Request, res: Response) => {
   try {
     const { status } = req.body;
-    const updated = await repo.updatePropertyStatus(req.params.id, status);
+    const updated = await getRequestRepository(req).updatePropertyStatus(req.params.id, status);
     res.json({ success: true, data: updated });
   } catch (err: any) {
     res.status(400).json({ success: false, error: err.message });
@@ -113,7 +116,7 @@ municipalApiRouter.patch('/api/properties/:id/verify', async (req: Request, res:
 municipalApiRouter.get('/api/assessments', async (req: Request, res: Response) => {
   try {
     const { propertyId } = req.query;
-    const asms = await repo.listAssessments(propertyId as string);
+    const asms = await getRequestRepository(req).listAssessments(propertyId as string);
     res.json({ success: true, count: asms.length, data: asms });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -137,7 +140,7 @@ municipalApiRouter.post('/api/assessments', async (req: Request, res: Response) 
     const penalty = 0;
     const totalTax = Math.round((baseTax - discount) * 100) / 100;
 
-    const asm = await repo.createAssessment({
+    const asm = await getRequestRepository(req).createAssessment({
       assessmentNumber: `CT-ASM-${Date.now()}`,
       propertyId,
       assessmentYear,
@@ -163,7 +166,7 @@ municipalApiRouter.post('/api/assessments', async (req: Request, res: Response) 
 // GET /api/assessments/:id
 municipalApiRouter.get('/api/assessments/:id', async (req: Request, res: Response) => {
   try {
-    const asm = await repo.getAssessmentById(req.params.id);
+    const asm = await getRequestRepository(req).getAssessmentById(req.params.id);
     if (!asm) {
       res.status(404).json({ success: false, error: 'Assessment not found' });
       return;
@@ -179,7 +182,7 @@ municipalApiRouter.get('/api/assessments/:id', async (req: Request, res: Respons
 municipalApiRouter.get('/api/payments', async (req: Request, res: Response) => {
   try {
     const { assessmentId } = req.query;
-    const payments = await repo.listPayments(assessmentId as string);
+    const payments = await getRequestRepository(req).listPayments(assessmentId as string);
     res.json({ success: true, count: payments.length, data: payments });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -196,7 +199,7 @@ municipalApiRouter.post('/api/payments', async (req: Request, res: Response) => 
       return;
     }
 
-    const result = await repo.createPayment({
+    const result = await getRequestRepository(req).createPayment({
       assessmentId,
       amountPaid: Number(amountPaid),
       paymentMethod: paymentMethod || 'UPI',
@@ -216,7 +219,7 @@ municipalApiRouter.post('/api/payments', async (req: Request, res: Response) => 
 municipalApiRouter.get('/api/grievances', async (req: Request, res: Response) => {
   try {
     const { citizenId } = req.query;
-    const grievances = await repo.listGrievances(citizenId as string);
+    const grievances = await getRequestRepository(req).listGrievances(citizenId as string);
     res.json({ success: true, count: grievances.length, data: grievances });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -232,7 +235,7 @@ municipalApiRouter.post('/api/grievances', async (req: Request, res: Response) =
       return;
     }
 
-    const grv = await repo.createGrievance({
+    const grv = await getRequestRepository(req).createGrievance({
       propertyId,
       citizenId: citizenId || 'usr-citizen-01',
       subject,
@@ -252,7 +255,7 @@ municipalApiRouter.post('/api/grievances', async (req: Request, res: Response) =
 municipalApiRouter.get('/api/reassessments', async (req: Request, res: Response) => {
   try {
     const { propertyId } = req.query;
-    const items = await repo.listReassessments(propertyId as string);
+    const items = await getRequestRepository(req).listReassessments(propertyId as string);
     res.json({ success: true, count: items.length, data: items });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -268,7 +271,7 @@ municipalApiRouter.post('/api/reassessments', async (req: Request, res: Response
       return;
     }
 
-    const item = await repo.createReassessment({
+    const item = await getRequestRepository(req).createReassessment({
       propertyId,
       originalAssessmentId,
       requestedChange,
@@ -286,7 +289,7 @@ municipalApiRouter.post('/api/reassessments', async (req: Request, res: Response
 // GET /api/dashboard
 municipalApiRouter.get('/api/dashboard', async (req: Request, res: Response) => {
   try {
-    const metrics = await repo.getDashboardMetrics();
+    const metrics = await getRequestRepository(req).getDashboardMetrics();
     res.json({ success: true, data: metrics });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });

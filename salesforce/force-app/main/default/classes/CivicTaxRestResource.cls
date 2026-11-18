@@ -80,9 +80,23 @@ global with sharing class CivicTaxRestResource {
             } else if (endpoint.startsWith('assessments')) {
                 if (CivicTaxSecurityService.isOfficerOrAdmin()) {
                     List<Tax_Assessment__c> asms = [
-                        SELECT Id, Name, Assessment_Year__c, Property__c, Base_Value__c, Total_Amount__c, 
-                               Amount_Paid__c, Outstanding_Amount__c, Due_Date__c, Assessment_Status__c 
-                        FROM Tax_Assessment__c 
+                        SELECT Id,
+       Name,
+       Assessment_Number__c,
+       Assessment_Year__c,
+       Property__c,
+       Base_Value__c,
+       Base_Tax__c,
+       Applied_Rate_Per_Sq_Ft__c,
+       Penalty__c,
+       Discount__c,
+       Total_Tax__c,
+       Total_Amount__c,
+       Amount_Paid__c,
+       Outstanding_Amount__c,
+       Due_Date__c,
+       Assessment_Status__c
+FROM Tax_Assessment__c 
                         ORDER BY Due_Date__c ASC 
                         LIMIT 100
                     ];
@@ -93,9 +107,23 @@ global with sharing class CivicTaxRestResource {
                     Id currentUserId = UserInfo.getUserId();
                     String currentUserEmail = UserInfo.getUserEmail();
                     List<Tax_Assessment__c> citizenAsms = [
-                        SELECT Id, Name, Assessment_Year__c, Property__c, Base_Value__c, Total_Amount__c, 
-                               Amount_Paid__c, Outstanding_Amount__c, Due_Date__c, Assessment_Status__c 
-                        FROM Tax_Assessment__c 
+                        SELECT Id,
+       Name,
+       Assessment_Number__c,
+       Assessment_Year__c,
+       Property__c,
+       Base_Value__c,
+       Base_Tax__c,
+       Applied_Rate_Per_Sq_Ft__c,
+       Penalty__c,
+       Discount__c,
+       Total_Tax__c,
+       Total_Amount__c,
+       Amount_Paid__c,
+       Outstanding_Amount__c,
+       Due_Date__c,
+       Assessment_Status__c
+FROM Tax_Assessment__c
                         WHERE Property__r.OwnerId = :currentUserId OR Property__r.Property_Owner__r.Email = :currentUserEmail 
                         ORDER BY Due_Date__c ASC 
                         LIMIT 100

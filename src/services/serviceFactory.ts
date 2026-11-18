@@ -1,4 +1,4 @@
-import {
+﻿import {
   IUserService,
   IPropertyService,
   ITaxRateService,
@@ -13,6 +13,7 @@ import {
 
 import { LocalUserService } from './local/LocalUserService';
 import { LocalPropertyService } from './local/LocalPropertyService';
+import { SalesforcePropertyService } from './SalesforcePropertyService';
 import { LocalTaxRateService } from './local/LocalTaxRateService';
 import { LocalAssessmentService } from './local/LocalAssessmentService';
 import { LocalPaymentService } from './local/LocalPaymentService';
@@ -37,16 +38,13 @@ class ServiceFactory {
   public readonly zoneService: IZoneService;
 
   private constructor() {
-    // Check if future Salesforce environment flag is toggled
     const useSalesforce = import.meta.env.VITE_USE_SALESFORCE === 'true';
 
-    if (useSalesforce) {
-      console.info('ServiceFactory: Initializing Salesforce Service Adapters (Phase 2 stub)');
-    }
-
-    // Initialize Local implementations for current phase
     this.userService = new LocalUserService();
-    this.propertyService = new LocalPropertyService();
+    this.propertyService = useSalesforce
+      ? new SalesforcePropertyService()
+      : new LocalPropertyService();
+
     this.taxRateService = new LocalTaxRateService();
     this.assessmentService = new LocalAssessmentService();
     this.paymentService = new LocalPaymentService();
@@ -55,6 +53,10 @@ class ServiceFactory {
     this.notificationService = new LocalNotificationService();
     this.dashboardService = new LocalDashboardService();
     this.zoneService = new LocalZoneService();
+
+    console.info(
+      `CivicTax Property Data Source: ${useSalesforce ? 'Salesforce' : 'Local Demo'}`
+    );
   }
 
   public static getInstance(): ServiceFactory {

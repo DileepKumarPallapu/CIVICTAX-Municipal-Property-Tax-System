@@ -2,11 +2,13 @@
 <CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
     <fullName>Property_Category__c</fullName>
     <description>Municipal zoning property classification</description>
+    <externalId>false</externalId>
     <label>Property Category</label>
-    <required>true</required>
+    <required>false</required>
+    <trackHistory>false</trackHistory>
+    <trackTrending>false</trackTrending>
     <type>Picklist</type>
     <valueSet>
-        <restricted>true</restricted>
         <valueSetDefinition>
             <sorted>false</sorted>
             <value>

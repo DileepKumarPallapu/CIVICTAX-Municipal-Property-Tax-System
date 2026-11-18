@@ -106,10 +106,12 @@ export class SalesforceClient {
     }
 
     const response = await fetch(url, {
-      method,
-      headers,
-      body: body ? JSON.stringify(body) : undefined,
-    });
+  method,
+  headers,
+  ...(body && ['POST', 'PATCH'].includes(method)
+    ? { body: JSON.stringify(body) }
+    : {}),
+});
 
     if (response.status === 401 && session.refreshToken) {
       // Refresh token and retry once
@@ -118,10 +120,12 @@ export class SalesforceClient {
       headers['Authorization'] = `Bearer ${session.accessToken}`;
 
       const retryRes = await fetch(url, {
-        method,
-        headers,
-        body: body ? JSON.stringify(body) : undefined,
-      });
+  method,
+  headers,
+  ...(body && ['POST', 'PATCH'].includes(method)
+    ? { body: JSON.stringify(body) }
+    : {}),
+});
 
       if (!retryRes.ok) {
         const err = await retryRes.text();

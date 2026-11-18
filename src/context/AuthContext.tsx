@@ -1,7 +1,17 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
+
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  ReactNode,
+  useCallback,
+} from 'react';
+
 import { User, UserRole } from '../types';
 import { services } from '../services/serviceFactory';
 import { StorageService } from '../services/storageService';
+import { AuthApi, BackendUser } from '../services/authApi';
 
 interface AuthContextType {
   currentUser: User | null;
@@ -16,43 +26,79 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+const mapBackendUser = (backendUser: BackendUser): User => {
+  const existingUser = StorageService.getUsers().find(
+    (user) =>
+      user.id === backendUser.id ||
+      user.email.toLowerCase() === backendUser.email.toLowerCase()
+  );
+
+  return {
+    ...existingUser,
+    id: backendUser.id,
+    name: backendUser.name,
+    email: backendUser.email,
+    role: backendUser.role,
+    phone: existingUser?.phone || '',
+    createdAt: existingUser?.createdAt || new Date().toISOString(),
+  };
+};
+
+export const AuthProvider: React.FC<{ children: ReactNode }> = ({
+  children,
+}) => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Initialize session and storage
-  useEffect(() => {
-    StorageService.initialize();
-    const stored = StorageService.getCurrentUser();
-    setCurrentUser(stored);
-    setIsLoading(false);
+  const restoreSession = useCallback(async () => {
+    try {
+      StorageService.initialize();
 
-    // Storage update listener for sync across tabs/resets
-    const handleStorageUpdate = (e: Event) => {
-      const customEvent = e as CustomEvent;
-      if (customEvent.detail?.key === 'civictax_current_user' || e.type === 'civictax_data_reset') {
-        setCurrentUser(StorageService.getCurrentUser());
+      const response = await AuthApi.getCurrentUser();
+
+      if (response.authenticated && response.user) {
+        const user = mapBackendUser(response.user);
+        setCurrentUser(user);
+        StorageService.setCurrentUser(user);
+      } else {
+        setCurrentUser(null);
+        StorageService.setCurrentUser(null);
       }
-    };
-
-    window.addEventListener('civictax_storage_update', handleStorageUpdate);
-    window.addEventListener('civictax_data_reset', handleStorageUpdate);
-    return () => {
-      window.removeEventListener('civictax_storage_update', handleStorageUpdate);
-      window.removeEventListener('civictax_data_reset', handleStorageUpdate);
-    };
+    } catch (error) {
+      console.error('Unable to restore authentication session:', error);
+      setCurrentUser(null);
+      StorageService.setCurrentUser(null);
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
+
+ useEffect(() => {
+  void restoreSession();
+}, [restoreSession]);
 
   const refreshSession = useCallback(() => {
-    const user = StorageService.getCurrentUser();
-    setCurrentUser(user);
-  }, []);
-
-  const login = async (email: string, password?: string): Promise<User> => {
     setIsLoading(true);
+    void restoreSession();
+  }, [restoreSession]);
+
+  const login = async (
+    email: string,
+    password?: string
+  ): Promise<User> => {
+    setIsLoading(true);
+
     try {
-      const user = await services.userService.login(email, password);
+      if (!password) {
+        throw new Error('Password is required');
+      }
+
+      const response = await AuthApi.login(email, password);
+      const user = mapBackendUser(response.user);
+
       setCurrentUser(user);
+      StorageService.setCurrentUser(user);
+
       return user;
     } finally {
       setIsLoading(false);
@@ -61,18 +107,31 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const logout = async (): Promise<void> => {
     setIsLoading(true);
+
     try {
-      await services.userService.logout();
-      setCurrentUser(null);
+      await AuthApi.logout();
     } finally {
+      setCurrentUser(null);
+      StorageService.setCurrentUser(null);
       setIsLoading(false);
     }
   };
 
-  const updateProfile = async (userData: Partial<User>): Promise<User> => {
-    if (!currentUser) throw new Error('No user is currently signed in');
-    const updated = await services.userService.updateUser(currentUser.id, userData);
+  const updateProfile = async (
+    userData: Partial<User>
+  ): Promise<User> => {
+    if (!currentUser) {
+      throw new Error('No user is currently signed in');
+    }
+
+    const updated = await services.userService.updateUser(
+      currentUser.id,
+      userData
+    );
+
     setCurrentUser(updated);
+    StorageService.setCurrentUser(updated);
+
     return updated;
   };
 
@@ -96,6 +155,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (!context) throw new Error('useAuth must be used within AuthProvider');
+
+  if (!context) {
+    throw new Error('useAuth must be used within AuthProvider');
+  }
+
   return context;
 };

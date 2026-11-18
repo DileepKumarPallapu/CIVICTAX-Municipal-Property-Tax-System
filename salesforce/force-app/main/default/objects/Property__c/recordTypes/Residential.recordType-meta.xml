@@ -7,8 +7,35 @@
     <picklistValues>
         <picklist>Property_Category__c</picklist>
         <values>
-            <fullName>Residential</fullName>
+            <fullName>RESIDENTIAL</fullName>
             <default>true</default>
+        </values>
+    </picklistValues>
+    <picklistValues>
+        <picklist>Registration_Status__c</picklist>
+        <values>
+            <fullName>Active</fullName>
+            <default>false</default>
+        </values>
+        <values>
+            <fullName>Draft</fullName>
+            <default>true</default>
+        </values>
+        <values>
+            <fullName>Rejected</fullName>
+            <default>false</default>
+        </values>
+        <values>
+            <fullName>Submitted</fullName>
+            <default>false</default>
+        </values>
+        <values>
+            <fullName>Under Verification</fullName>
+            <default>false</default>
+        </values>
+        <values>
+            <fullName>Verified</fullName>
+            <default>false</default>
         </values>
     </picklistValues>
     <picklistValues>
@@ -18,11 +45,11 @@
             <default>true</default>
         </values>
         <values>
-            <fullName>VERIFIED</fullName>
+            <fullName>REJECTED</fullName>
             <default>false</default>
         </values>
         <values>
-            <fullName>REJECTED</fullName>
+            <fullName>VERIFIED</fullName>
             <default>false</default>
         </values>
     </picklistValues>

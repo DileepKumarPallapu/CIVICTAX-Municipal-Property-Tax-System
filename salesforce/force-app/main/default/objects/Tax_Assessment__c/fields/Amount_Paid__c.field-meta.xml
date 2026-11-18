@@ -3,10 +3,12 @@
     <fullName>Amount_Paid__c</fullName>
     <defaultValue>0</defaultValue>
     <description>Cumulative successful payments against this assessment</description>
+    <externalId>false</externalId>
     <label>Amount Paid</label>
     <precision>14</precision>
     <required>false</required>
     <scale>2</scale>
     <trackHistory>true</trackHistory>
+    <trackTrending>false</trackTrending>
     <type>Currency</type>
 </CustomField>

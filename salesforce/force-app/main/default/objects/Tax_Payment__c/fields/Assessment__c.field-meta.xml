@@ -3,11 +3,13 @@
     <fullName>Assessment__c</fullName>
     <deleteConstraint>Restrict</deleteConstraint>
     <description>Assessment bill against which this payment was made</description>
+    <externalId>false</externalId>
     <label>Assessment</label>
     <referenceTo>Tax_Assessment__c</referenceTo>
     <relationshipLabel>Tax Payments</relationshipLabel>
     <relationshipName>Tax_Payments</relationshipName>
     <required>true</required>
     <trackHistory>true</trackHistory>
+    <trackTrending>false</trackTrending>
     <type>Lookup</type>
 </CustomField>

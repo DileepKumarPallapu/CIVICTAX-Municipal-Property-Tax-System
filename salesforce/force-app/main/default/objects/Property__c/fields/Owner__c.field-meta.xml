@@ -10,5 +10,6 @@
     <relationshipName>Properties_Owned</relationshipName>
     <required>false</required>
     <trackHistory>true</trackHistory>
+    <trackTrending>false</trackTrending>
     <type>Lookup</type>
 </CustomField>

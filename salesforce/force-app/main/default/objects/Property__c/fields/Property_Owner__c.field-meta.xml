@@ -3,11 +3,13 @@
     <fullName>Property_Owner__c</fullName>
     <deleteConstraint>SetNull</deleteConstraint>
     <description>Citizen owner contact record</description>
+    <externalId>false</externalId>
     <label>Property Owner</label>
     <referenceTo>Contact</referenceTo>
     <relationshipLabel>Properties</relationshipLabel>
     <relationshipName>Properties</relationshipName>
     <required>false</required>
     <trackHistory>true</trackHistory>
+    <trackTrending>false</trackTrending>
     <type>Lookup</type>
 </CustomField>

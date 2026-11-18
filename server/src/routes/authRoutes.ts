@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+﻿import { Router, Request, Response } from 'express';
 import { config } from '../config/index.js';
 import { PKCEUtils } from '../utils/pkce.js';
 import { SalesforceClient } from '../services/salesforceClient.js';
@@ -20,7 +20,7 @@ export const authRouter = Router();
 const REGISTERED_USERS: Record<string, { passwordHash: string; user: CivicTaxSessionUser }> = {
   'admin@civictax.demo': {
     passwordHash: 'Admin@123',
-    user: { id: 'usr-admin-01', email: 'admin@civictax.demo', role: 'ADMIN', name: 'Vikram Malhotra' },
+    user: { id: 'usr-admin-01', email: 'admin@civictax.demo', role: 'ADMIN', name: 'Pallapu Dileep Kumar' },
   },
   'officer@civictax.demo': {
     passwordHash: 'Officer@123',
@@ -90,7 +90,7 @@ authRouter.get('/auth/salesforce', (req: Request, res: Response) => {
     code_challenge: codeChallenge,
     code_challenge_method: 'S256',
     state: state,
-    scope: 'api refresh_token id web',
+    scope: 'api refresh_token web',
     prompt: 'login consent',
   });
 
@@ -200,12 +200,19 @@ authRouter.get('/api/salesforce/status', (req: Request, res: Response) => {
 // POST /auth/salesforce/logout - Revoke Session & Disconnect
 authRouter.post('/auth/salesforce/logout', (req: Request, res: Response) => {
   delete req.session.salesforceSession;
-  req.session.destroy((err) => {
+  delete req.session.oauthState;
+  delete req.session.codeVerifier;
+
+  req.session.save((err) => {
     if (err) {
-      res.status(500).json({ error: 'Failed to clear session' });
+      res.status(500).json({ error: 'Failed to clear Salesforce session' });
       return;
     }
-    res.clearCookie('civictax.sid');
-    res.json({ success: true, message: 'Salesforce session disconnected' });
+
+    res.json({
+      success: true,
+      message: 'Salesforce disconnected. CivicTax login remains active.',
+    });
   });
 });
+
