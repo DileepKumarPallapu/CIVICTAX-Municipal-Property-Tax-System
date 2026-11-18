@@ -166,35 +166,80 @@ export class SalesforcePropertyService implements IPropertyService {
     );
   }
 
-  ppublic async createProperty(
-  data: Omit<
-    Property,
-    'id' | 'propertyNumber' | 'registrationDate' |
-    'updatedAt' | 'verificationStatus'
-  >
-): Promise<Property> {
-  const result = await this.request<{ data: BackendProperty }>(
-    '/api/properties',
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        ownerId: data.ownerId,
-        ownerName: data.ownerName,
-        address: data.address,
-        category: data.category,
-        zone: data.zoneName || data.zoneId,
-        builtUpArea: data.builtUpArea,
-        documentReference: data.documentReference,
-        constructionYear: data.constructionYear,
-        verificationStatus: 'PENDING',
-      }),
-    }
-  );
+ 
+  public async createProperty(
+    data: Omit<
+      Property,
+      | 'id'
+      | 'propertyNumber'
+      | 'registrationDate'
+      | 'updatedAt'
+      | 'verificationStatus'
+    >
+  ): Promise<Property> {
+    const result = await this.request<{ data: BackendProperty }>(
+      '/api/properties',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          ownerId: data.ownerId,
+          ownerName: data.ownerName,
+          address: data.address,
+          category: data.category,
+          zone: data.zoneName || data.zoneId,
+          builtUpArea: data.builtUpArea,
+          documentReference: data.documentReference,
+          constructionYear: data.constructionYear,
+        }),
+      }
+    );
 
-  if (!result.data) {
-    throw new Error('Salesforce did not return the registered property.');
+    if (!result.data) {
+      throw new Error(
+        'Salesforce did not return the registered property.'
+      );
+    }
+
+    return this.mapProperty(result.data);
   }
 
-  return this.mapProperty(result.data);
+  public async updateProperty(
+    id: string,
+    data: Partial<Property>
+  ): Promise<Property> {
+    const result = await this.request<{ data: BackendProperty }>(
+      `/api/properties/${encodeURIComponent(id)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      }
+    );
+
+    return this.mapProperty(result.data);
+  }
+
+  public async verifyProperty(
+    id: string,
+    status: PropertyVerificationStatus,
+    _officerId: string,
+    _officerName: string,
+    comments?: string
+  ): Promise<Property> {
+    const result = await this.request<{ data: BackendProperty }>(
+      `/api/properties/${encodeURIComponent(id)}/verify`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ status, comments }),
+      }
+    );
+
+    return this.mapProperty(result.data);
+  }
+
+  public async deleteProperty(_id: string): Promise<boolean> {
+    throw new Error(
+      'Salesforce property deletion is disabled. No Salesforce records have been deleted.'
+    );
+  }
 }
 
