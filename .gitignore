@@ -44,3 +44,8 @@ salesforce/.sf/
 
 # Salesforce local state
 salesforce/.sf/
+
+# Backup files
+*.bak
+*.backup
+*.broken-*
