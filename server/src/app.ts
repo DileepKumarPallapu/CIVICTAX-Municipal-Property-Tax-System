@@ -52,36 +52,35 @@ app.use(express.json());
 app.use(cookieParser());
 
 // Express Session Setup with Durable Redis Store in Production / Ephemeral fallback in Local
+// Express Session Setup
 const isProduction = config.nodeEnv === 'production' || Boolean(process.env.VERCEL);
 
-let sessionStore: session.Store | undefined = undefined;
+let sessionStore: session.Store | undefined;
+
 if (config.redisUrl) {
-  try {
-    const redisClient = new Redis(config.redisUrl, {
-      maxRetriesPerRequest: 3,
-      enableReadyCheck: false,
-      lazyConnect: true,
-    });
-    redisClient.connect().catch((err: Error) => {
-      console.warn('CivicTax Gateway: Redis connection attempt encountered error:', err.message);
-    });
-    sessionStore = new RedisStore({
-      client: redisClient,
-      prefix: 'civictax:sess:',
-      ttl: 8 * 60 * 60, // 8 hours in seconds
-    });
-    console.info('CivicTax Gateway: Configured durable Redis session store for Vercel Serverless clustering.');
-  } catch (err: any) {
-    console.warn('CivicTax Gateway: Failed to initialize RedisStore, falling back to local memory store:', err.message);
-  }
-} else {
-  if (isProduction) {
-    console.warn(
-      'CivicTax Gateway WARNING: REDIS_URL not configured in production environment. ' +
-      'Serverless functions require REDIS_URL (e.g., Upstash Redis) for cross-instance session persistence. ' +
-      'Falling back to MemoryStore.'
-    );
-  }
+  const redisClient = new Redis(config.redisUrl, {
+    maxRetriesPerRequest: 3,
+    enableReadyCheck: false,
+    lazyConnect: true,
+  });
+
+  redisClient.on('error', (err) => {
+    console.error('Redis session error:', err.message);
+  });
+
+  redisClient.connect().catch((err) => {
+    console.error('Redis connection failed:', err.message);
+  });
+
+  sessionStore = new RedisStore({
+    client: redisClient,
+    prefix: 'civictax:sess:',
+    ttl: 8 * 60 * 60,
+  });
+} else if (isProduction) {
+  throw new Error(
+    'REDIS_URL is required in production. Configure Redis before starting CivicTax.'
+  );
 }
 
 app.use(
@@ -95,7 +94,7 @@ app.use(
       httpOnly: true,
       secure: isProduction,
       sameSite: isProduction ? 'none' : 'lax',
-      maxAge: 8 * 60 * 60 * 1000, // 8 hours
+      maxAge: 8 * 60 * 60 * 1000,
     },
   })
 );

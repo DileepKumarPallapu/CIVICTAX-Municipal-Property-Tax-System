@@ -1,0 +1,2891 @@
+=== CIVICTAX SOURCE FILES ===
+
+
+========== .\server\src\repositories\SalesforceRepository.ts ==========
+import { ICivicTaxRepository } from './ICivicTaxRepository.js';
+import {
+  IProperty,
+  ITaxAssessment,
+  ITaxPayment,
+  IGrievance,
+  IReassessment,
+  IDashboardMetrics,
+} from './types.js';
+import { SalesforceSessionData } from '../types/index.js';
+import { SalesforceClient } from '../services/salesforceClient.js';
+
+type SalesforceRecord = {
+  [key: string]: any;
+};
+
+export class SalesforceRepository implements ICivicTaxRepository {
+  constructor(private readonly session: SalesforceSessionData) {
+    if (!session?.accessToken || !session?.instanceUrl) {
+      throw new Error('A valid Salesforce session is required.');
+    }
+  }
+
+  private async call(
+    endpoint: string,
+    method: 'GET' | 'POST' | 'PATCH' = 'GET',
+    body?: unknown
+  ): Promise<any> {
+    return SalesforceClient.callApexRest(
+      this.session,
+      endpoint,
+      method,
+      body
+    );
+  }
+
+  private unsupported(operation: string): never {
+    throw new Error(
+      `${operation} is not available in the current Salesforce Apex REST API.`
+    );
+  }
+
+  private mapProperty(record: SalesforceRecord): IProperty {
+    const category = String(
+      record.Property_Category__c ?? 'RESIDENTIAL'
+    ).toUpperCase();
+
+    const validCategories = [
+      'RESIDENTIAL',
+      'COMMERCIAL',
+      'INDUSTRIAL',
+      'AGRICULTURAL',
+    ];
+
+    const verificationStatus = String(
+      record.Verification_Status__c ?? 'PENDING'
+    ).toUpperCase();
+
+    const validStatuses = [
+      'PENDING',
+      'VERIFIED',
+      'RESUBMISSION_REQUIRED',
+      'REJECTED',
+    ];
+
+    return {
+      id: record.Id,
+      propertyNumber:
+        record.Property_Number__c ?? record.Name ?? '',
+      ownerId: record.OwnerId ?? record.Property_Owner__c ?? '',
+      ownerName:
+        record.Property_Owner__r?.Name ??
+        record.Owner?.Name ??
+        'Not available',
+      address: record.Property_Address__c ?? '',
+      category: validCategories.includes(category)
+        ? category as IProperty['category']
+        : 'RESIDENTIAL',
+      builtUpArea: Number(record.Built_Up_Area__c ?? 0),
+      zone: record.Zone__c ?? record.Municipal_Zone__c ?? '',
+      verificationStatus: validStatuses.includes(verificationStatus)
+        ? verificationStatus as IProperty['verificationStatus']
+        : 'PENDING',
+      documentReference: record.Ownership_Document__c ?? '',
+      latitude:
+        record.Latitude__c == null
+          ? undefined
+          : Number(record.Latitude__c),
+      longitude:
+        record.Longitude__c == null
+          ? undefined
+          : Number(record.Longitude__c),
+      constructionYear:
+        record.Construction_Year__c == null
+          ? undefined
+          : Number(record.Construction_Year__c),
+      registrationDate: record.Registration_Date__c ?? '',
+    };
+  }
+
+  private mapAssessment(
+    record: SalesforceRecord,
+    property?: IProperty
+  ): ITaxAssessment {
+    const baseTax = Number(
+      record.Base_Tax__c ?? record.Base_Value__c ?? 0
+    );
+
+    const totalTax = Number(
+      record.Total_Tax__c ??
+      record.Total_Amount__c ??
+      baseTax
+    );
+
+    const amountPaid = Number(record.Amount_Paid__c ?? 0);
+
+    const outstandingBalance = Number(
+      record.Outstanding_Amount__c ??
+      Math.max(0, totalTax - amountPaid)
+    );
+
+    const rawStatus = String(
+      record.Assessment_Status__c ?? 'DRAFT'
+    ).toUpperCase();
+
+    const validStatuses = [
+      'DRAFT',
+      'APPROVED',
+      'PARTIALLY_PAID',
+      'PAID',
+      'OVERDUE',
+    ];
+
+    return {
+      id: record.Id,
+      assessmentNumber:
+        record.Assessment_Number__c ??
+        record.Name ??
+        record.Id,
+      propertyId: record.Property__c ?? '',
+      assessmentYear: record.Assessment_Year__c ?? '',
+      category: property?.category ?? '',
+      builtUpArea: property?.builtUpArea ?? 0,
+      appliedRatePerSqFt: Number(
+        record.Applied_Rate_Per_Sq_Ft__c ?? 0
+      ),
+      baseTax,
+      penalty: Number(record.Penalty__c ?? 0),
+      discount: Number(record.Discount__c ?? 0),
+      totalTax,
+      amountPaid,
+      outstandingBalance,
+      status: validStatuses.includes(rawStatus)
+        ? rawStatus as ITaxAssessment['status']
+        : 'DRAFT',
+      dueDate: record.Due_Date__c ?? '',
+    };
+  }
+
+  private mapPayment(record: SalesforceRecord): ITaxPayment {
+    return {
+      id: record.Id,
+      assessmentId: record.Assessment__c ?? '',
+      amountPaid: Number(record.Amount_Paid__c ?? 0),
+      paymentDate: record.Payment_Date__c ?? '',
+      paymentMethod: record.Payment_Method__c ?? '',
+      transactionId: record.Transaction_ID__c ?? '',
+      paymentStatus:
+        record.Payment_Status__c === 'SUCCESS' ||
+        record.Payment_Status__c === 'FAILED'
+          ? record.Payment_Status__c
+          : 'PENDING',
+      receiptNumber: record.Name ?? record.Id,
+    };
+  }
+
+  // PROPERTIES
+
+  public async listProperties(
+    filter?: { category?: string; zone?: string; status?: string }
+  ): Promise<IProperty[]> {
+    const records = await this.call('properties');
+
+    if (!Array.isArray(records)) {
+      throw new Error('Unexpected Salesforce properties response.');
+    }
+
+    let properties = records.map((record) =>
+      this.mapProperty(record)
+    );
+
+    if (filter?.category) {
+      properties = properties.filter(
+        (property) => property.category === filter.category
+      );
+    }
+
+    if (filter?.zone) {
+      properties = properties.filter(
+        (property) => property.zone === filter.zone
+      );
+    }
+
+    if (filter?.status) {
+      properties = properties.filter(
+        (property) =>
+          property.verificationStatus === filter.status
+      );
+    }
+
+    return properties;
+  }
+
+  public async getPropertyById(
+    id: string
+  ): Promise<IProperty | null> {
+    try {
+      const record = await this.call(
+        `properties/${encodeURIComponent(id)}`
+      );
+
+      return record?.Id ? this.mapProperty(record) : null;
+    } catch (error: any) {
+      if (
+        error.message?.includes('(404)') ||
+        error.message?.includes('NOT_FOUND')
+      ) {
+        return null;
+      }
+
+      throw error;
+    }
+  }
+
+  public async createProperty(
+    property: Omit<IProperty, 'id' | 'registrationDate'>
+  ): Promise<IProperty> {
+    const record = await this.call('properties', 'POST', {
+      propertyNumber: property.propertyNumber,
+      address: property.address,
+      category: property.category,
+      builtUpArea: property.builtUpArea,
+      zone: property.zone,
+      latitude: property.latitude,
+      longitude: property.longitude,
+      documentReference: property.documentReference,
+      constructionYear: property.constructionYear,
+    });
+
+    if (!record?.Id) {
+      throw new Error(
+        'Salesforce did not return the created property record.'
+      );
+    }
+
+    return this.mapProperty(record);
+  }
+
+  public async updatePropertyStatus(
+    id: string,
+    status: IProperty['verificationStatus']
+  ): Promise<IProperty> {
+    const record = await this.call('properties', 'PATCH', {
+      propertyId: id,
+      status,
+      notes: '',
+    });
+
+    if (!record?.Id) {
+      throw new Error(
+        'Salesforce did not return the updated property record.'
+      );
+    }
+
+    return this.mapProperty(record);
+  }
+
+  // ASSESSMENTS
+
+  public async listAssessments(
+    propertyId?: string
+  ): Promise<ITaxAssessment[]> {
+    const [records, properties] = await Promise.all([
+      this.call('assessments'),
+      this.listProperties(),
+    ]);
+
+    if (!Array.isArray(records)) {
+      throw new Error('Unexpected Salesforce assessments response.');
+    }
+
+    const propertyMap = new Map(
+      properties.map((property) => [property.id, property])
+    );
+
+    let assessments = records.map((record) =>
+      this.mapAssessment(
+        record,
+        propertyMap.get(record.Property__c)
+      )
+    );
+
+    if (propertyId) {
+      assessments = assessments.filter(
+        (assessment) => assessment.propertyId === propertyId
+      );
+    }
+
+    return assessments;
+  }
+
+  public async getAssessmentById(
+    id: string
+  ): Promise<ITaxAssessment | null> {
+    const assessments = await this.listAssessments();
+
+    return (
+      assessments.find(
+        (assessment) =>
+          assessment.id === id ||
+          assessment.assessmentNumber === id
+      ) ?? null
+    );
+  }
+
+  public async createAssessment(
+    _assessment: Omit<ITaxAssessment, 'id'>
+  ): Promise<ITaxAssessment> {
+    return this.unsupported('Assessment creation');
+  }
+
+  // PAYMENTS
+
+  public async listPayments(
+    _assessmentId?: string
+  ): Promise<ITaxPayment[]> {
+    return this.unsupported('Payment history retrieval');
+  }
+
+  public async createPayment(
+    payment: Omit<ITaxPayment, 'id' | 'receiptNumber'>
+  ): Promise<{
+    payment: ITaxPayment;
+    assessment: ITaxAssessment;
+  }> {
+    const currentAssessment = await this.getAssessmentById(
+      payment.assessmentId
+    );
+
+    if (!currentAssessment) {
+      throw new Error('Assessment not found in Salesforce.');
+    }
+
+    if (payment.amountPaid <= 0) {
+      throw new Error('Payment amount must be greater than zero.');
+    }
+
+    if (payment.amountPaid > currentAssessment.outstandingBalance) {
+      throw new Error('Payment exceeds the outstanding assessment balance.');
+    }
+
+    const record = await this.call('payments', 'POST', {
+      assessmentId: payment.assessmentId,
+      amountPaid: payment.amountPaid,
+      paymentMethod: payment.paymentMethod,
+      transactionId: payment.transactionId,
+    });
+
+    if (!record?.Id) {
+      throw new Error(
+        'Salesforce did not return the created payment record.'
+      );
+    }
+
+    const createdPayment = this.mapPayment(record);
+
+    // Apex PaymentService updates the assessment balance atomically.
+    // Reflect the confirmed payment in the returned assessment.
+    const updatedAssessment: ITaxAssessment = {
+      ...currentAssessment,
+      amountPaid:
+        Math.round(
+          (currentAssessment.amountPaid + createdPayment.amountPaid) *
+          100
+        ) / 100,
+      outstandingBalance:
+        Math.round(
+          (currentAssessment.outstandingBalance -
+            createdPayment.amountPaid) *
+          100
+        ) / 100,
+      status:
+        currentAssessment.outstandingBalance -
+          createdPayment.amountPaid <= 0
+          ? 'PAID'
+          : 'PARTIALLY_PAID',
+    };
+
+    return {
+      payment: createdPayment,
+      assessment: updatedAssessment,
+    };
+  }
+
+  // GRIEVANCES
+
+  public async listGrievances(
+    _citizenId?: string
+  ): Promise<IGrievance[]> {
+    return this.unsupported('Grievance retrieval');
+  }
+
+  public async createGrievance(
+    _grievance: Omit<
+      IGrievance,
+      'id' | 'grievanceNumber' | 'createdAt'
+    >
+  ): Promise<IGrievance> {
+    return this.unsupported('Grievance creation');
+  }
+
+  public async resolveGrievance(
+    _id: string,
+    _comments: string
+  ): Promise<IGrievance> {
+    return this.unsupported('Grievance resolution');
+  }
+
+  // REASSESSMENTS
+
+  public async listReassessments(
+    _propertyId?: string
+  ): Promise<IReassessment[]> {
+    return this.unsupported('Reassessment retrieval');
+  }
+
+  public async createReassessment(
+    _reassessment: Omit<
+      IReassessment,
+      'id' | 'requestNumber' | 'createdAt'
+    >
+  ): Promise<IReassessment> {
+    return this.unsupported('Reassessment creation');
+  }
+
+  // DASHBOARD
+
+  public async getDashboardMetrics(): Promise<IDashboardMetrics> {
+    const record = await this.call('dashboard');
+
+    if (!record || typeof record !== 'object') {
+      throw new Error('Unexpected Salesforce dashboard response.');
+    }
+
+    const totalProperties = Number(record.totalProperties ?? 0);
+    const verifiedProperties = Number(
+      record.verifiedProperties ?? 0
+    );
+    const pendingVerifications = Number(
+      record.pendingProperties ?? 0
+    );
+    const totalTaxAssessed = Number(
+      record.totalAssessedTax ??
+      record.totalTaxAssessed ??
+      0
+    );
+    const totalRevenueCollected = Number(
+      record.totalRevenueCollected ?? 0
+    );
+
+    const totalOutstandingDues = Math.max(
+      0,
+      totalTaxAssessed - totalRevenueCollected
+    );
+
+    const collectionEfficiencyRate =
+      totalTaxAssessed > 0
+        ? Math.round(
+            (totalRevenueCollected / totalTaxAssessed) * 10000
+          ) / 100
+        : 0;
+
+    return {
+      totalProperties,
+      verifiedProperties,
+      pendingVerifications,
+      totalTaxAssessed,
+      totalRevenueCollected,
+      totalOutstandingDues,
+      collectionEfficiencyRate,
+
+      // The current Apex dashboard does not expose grievance metrics.
+      // This is a placeholder, not an authoritative grievance count.
+      openGrievances: 0,
+    };
+  }
+}
+
+
+========== .\server\src\repositories\LocalRepository.ts ==========
+// server/src/repositories/LocalRepository.ts
+import { ICivicTaxRepository } from './ICivicTaxRepository.js';
+import { IProperty, ITaxAssessment, ITaxPayment, IGrievance, IReassessment, IDashboardMetrics } from './types.js';
+
+export class LocalRepository implements ICivicTaxRepository {
+  private properties: IProperty[] = [
+    {
+      id: 'prop-001',
+      propertyNumber: 'CT-PROP-2024-001',
+      ownerId: 'usr-citizen-01',
+      ownerName: 'Rajesh Kumar Sharma',
+      address: 'Flat 402, Wing B, Shanti Heights, M.G. Road',
+      category: 'RESIDENTIAL',
+      builtUpArea: 1200,
+      zone: 'Z-CENTRAL',
+      verificationStatus: 'VERIFIED',
+      documentReference: 'DOC-MH-PUN-2018-849201',
+      latitude: 18.5204,
+      longitude: 73.8567,
+      constructionYear: 2018,
+      registrationDate: new Date().toISOString(),
+    },
+    {
+      id: 'prop-002',
+      propertyNumber: 'CT-PROP-2024-002',
+      ownerId: 'usr-citizen-01',
+      ownerName: 'Rajesh Kumar Sharma',
+      address: 'Shop No. 12, Ground Floor, Central Plaza Mall',
+      category: 'COMMERCIAL',
+      builtUpArea: 650,
+      zone: 'Z-CENTRAL',
+      verificationStatus: 'VERIFIED',
+      documentReference: 'DOC-MH-PUN-2020-551982',
+      latitude: 18.5220,
+      longitude: 73.8580,
+      constructionYear: 2020,
+      registrationDate: new Date().toISOString(),
+    },
+  ];
+
+  private assessments: ITaxAssessment[] = [
+    {
+      id: 'asm-001',
+      assessmentNumber: 'CT-ASM-2024-001',
+      propertyId: 'prop-001',
+      assessmentYear: '2024-2025',
+      category: 'RESIDENTIAL',
+      builtUpArea: 1200,
+      appliedRatePerSqFt: 10,
+      baseTax: 12000,
+      penalty: 500,
+      discount: 0,
+      totalTax: 12500,
+      amountPaid: 6000,
+      outstandingBalance: 6500,
+      status: 'PARTIALLY_PAID',
+      dueDate: '2024-12-31',
+    },
+    {
+      id: 'asm-002',
+      assessmentNumber: 'CT-ASM-2024-002',
+      propertyId: 'prop-002',
+      assessmentYear: '2024-2025',
+      category: 'COMMERCIAL',
+      builtUpArea: 650,
+      appliedRatePerSqFt: 18,
+      baseTax: 11700,
+      penalty: 0,
+      discount: 500,
+      totalTax: 11200,
+      amountPaid: 0,
+      outstandingBalance: 11200,
+      status: 'APPROVED',
+      dueDate: '2024-11-30',
+    },
+  ];
+
+  private payments: ITaxPayment[] = [
+    {
+      id: 'pay-001',
+      assessmentId: 'asm-001',
+      amountPaid: 6000,
+      paymentDate: new Date().toISOString(),
+      paymentMethod: 'UPI',
+      transactionId: 'TXN-UPI-2024-001',
+      paymentStatus: 'SUCCESS',
+      receiptNumber: 'RCT-2024-001',
+    },
+  ];
+
+  private grievances: IGrievance[] = [
+    {
+      id: 'grv-001',
+      grievanceNumber: 'GRV-2024-001',
+      propertyId: 'prop-001',
+      citizenId: 'usr-citizen-01',
+      subject: 'Dispute over applied commercial rate',
+      description: 'The property is partly residential and was assessed as purely commercial.',
+      priority: 'MEDIUM',
+      status: 'OPEN',
+      createdAt: new Date().toISOString(),
+    },
+  ];
+
+  private reassessments: IReassessment[] = [
+    {
+      id: 'rr-001',
+      requestNumber: 'RR-2026-0001',
+      propertyId: 'prop-001',
+      originalAssessmentId: 'asm-001',
+      requestedChange: 'Built-up area reassessment following third-floor balcony enclosure.',
+      supportingReason: 'Municipal building plan amendment approval #BP-2025-9982',
+      approvalStatus: 'SUBMITTED',
+      createdAt: new Date().toISOString(),
+    },
+  ];
+
+  public async listProperties(filter?: { category?: string; zone?: string; status?: string }): Promise<IProperty[]> {
+    return this.properties.filter((p) => {
+      if (filter?.category && p.category !== filter.category) return false;
+      if (filter?.zone && p.zone !== filter.zone) return false;
+      if (filter?.status && p.verificationStatus !== filter.status) return false;
+      return true;
+    });
+  }
+
+  public async getPropertyById(id: string): Promise<IProperty | null> {
+    return this.properties.find((p) => p.id === id || p.propertyNumber === id) || null;
+  }
+
+  public async createProperty(prop: Omit<IProperty, 'id' | 'registrationDate'>): Promise<IProperty> {
+    const existing = this.properties.find((p) => p.propertyNumber === prop.propertyNumber);
+    if (existing) {
+      throw new Error(`Property ${prop.propertyNumber} already exists`);
+    }
+    const newProp: IProperty = {
+      ...prop,
+      id: `prop-${Date.now()}`,
+      registrationDate: new Date().toISOString(),
+    };
+    this.properties.push(newProp);
+    return newProp;
+  }
+
+  public async updatePropertyStatus(id: string, status: IProperty['verificationStatus']): Promise<IProperty> {
+    const prop = await this.getPropertyById(id);
+    if (!prop) throw new Error('Property not found');
+    prop.verificationStatus = status;
+    return prop;
+  }
+
+  public async listAssessments(propertyId?: string): Promise<ITaxAssessment[]> {
+    if (propertyId) {
+      return this.assessments.filter((a) => a.propertyId === propertyId);
+    }
+    return this.assessments;
+  }
+
+  public async getAssessmentById(id: string): Promise<ITaxAssessment | null> {
+    return this.assessments.find((a) => a.id === id || a.assessmentNumber === id) || null;
+  }
+
+  public async createAssessment(asm: Omit<ITaxAssessment, 'id'>): Promise<ITaxAssessment> {
+    const newAsm: ITaxAssessment = {
+      ...asm,
+      id: `asm-${Date.now()}`,
+    };
+    this.assessments.push(newAsm);
+    return newAsm;
+  }
+
+  public async listPayments(assessmentId?: string): Promise<ITaxPayment[]> {
+    if (assessmentId) {
+      return this.payments.filter((p) => p.assessmentId === assessmentId);
+    }
+    return this.payments;
+  }
+
+  public async createPayment(pmt: Omit<ITaxPayment, 'id' | 'receiptNumber'>): Promise<{ payment: ITaxPayment; assessment: ITaxAssessment }> {
+    const asm = await this.getAssessmentById(pmt.assessmentId);
+    if (!asm) throw new Error('Target assessment not found');
+
+    if (pmt.amountPaid <= 0) throw new Error('Payment amount must be greater than zero');
+    if (pmt.amountPaid > asm.outstandingBalance) {
+      throw new Error(`Payment amount (₹${pmt.amountPaid}) exceeds remaining balance (₹${asm.outstandingBalance})`);
+    }
+
+    const dup = this.payments.find((p) => p.transactionId === pmt.transactionId);
+    if (dup) throw new Error(`Duplicate transaction ID: ${pmt.transactionId}`);
+
+    const newPayment: ITaxPayment = {
+      ...pmt,
+      id: `pay-${Date.now()}`,
+      receiptNumber: `RCT-${Date.now()}`,
+    };
+    this.payments.push(newPayment);
+
+    // Atomically update assessment balance
+    asm.amountPaid = Math.round((asm.amountPaid + pmt.amountPaid) * 100) / 100;
+    asm.outstandingBalance = Math.round((asm.totalTax - asm.amountPaid) * 100) / 100;
+    asm.status = asm.outstandingBalance <= 0 ? 'PAID' : 'PARTIALLY_PAID';
+
+    return { payment: newPayment, assessment: asm };
+  }
+
+  public async listGrievances(citizenId?: string): Promise<IGrievance[]> {
+    if (citizenId) {
+      return this.grievances.filter((g) => g.citizenId === citizenId);
+    }
+    return this.grievances;
+  }
+
+  public async createGrievance(grv: Omit<IGrievance, 'id' | 'grievanceNumber' | 'createdAt'>): Promise<IGrievance> {
+    const newGrv: IGrievance = {
+      ...grv,
+      id: `grv-${Date.now()}`,
+      grievanceNumber: `GRV-${Date.now()}`,
+      createdAt: new Date().toISOString(),
+    };
+    this.grievances.push(newGrv);
+    return newGrv;
+  }
+
+  public async resolveGrievance(id: string, comments: string): Promise<IGrievance> {
+    const grv = this.grievances.find((g) => g.id === id || g.grievanceNumber === id);
+    if (!grv) throw new Error('Grievance not found');
+    grv.status = 'RESOLVED';
+    grv.resolutionComments = comments;
+    grv.resolutionDate = new Date().toISOString();
+    return grv;
+  }
+
+  public async listReassessments(propertyId?: string): Promise<IReassessment[]> {
+    if (propertyId) {
+      return this.reassessments.filter((r) => r.propertyId === propertyId);
+    }
+    return this.reassessments;
+  }
+
+  public async createReassessment(reassessment: Omit<IReassessment, 'id' | 'requestNumber' | 'createdAt'>): Promise<IReassessment> {
+    const newReassessment: IReassessment = {
+      ...reassessment,
+      id: `rr-${Date.now()}`,
+      requestNumber: `RR-${Date.now()}`,
+      createdAt: new Date().toISOString(),
+    };
+    this.reassessments.push(newReassessment);
+    return newReassessment;
+  }
+
+  public async getDashboardMetrics(): Promise<IDashboardMetrics> {
+    const totalProperties = this.properties.length;
+    const verifiedProperties = this.properties.filter((p) => p.verificationStatus === 'VERIFIED').length;
+    const pendingVerifications = this.properties.filter((p) => p.verificationStatus === 'PENDING').length;
+    
+    let totalTaxAssessed = 0;
+    let totalRevenueCollected = 0;
+    let totalOutstandingDues = 0;
+
+    for (const a of this.assessments) {
+      totalTaxAssessed += a.totalTax;
+      totalRevenueCollected += a.amountPaid;
+      totalOutstandingDues += a.outstandingBalance;
+    }
+
+    const collectionEfficiencyRate = totalTaxAssessed > 0 
+      ? Math.round((totalRevenueCollected / totalTaxAssessed) * 10000) / 100
+      : 0;
+
+    const openGrievances = this.grievances.filter((g) => g.status === 'OPEN').length;
+
+    return {
+      totalProperties,
+      verifiedProperties,
+      pendingVerifications,
+      totalTaxAssessed,
+      totalRevenueCollected,
+      totalOutstandingDues,
+      collectionEfficiencyRate,
+      openGrievances,
+    };
+  }
+}
+
+
+========== .\server\src\repositories\types.ts ==========
+// server/src/repositories/types.ts
+export interface IProperty {
+  id: string;
+  propertyNumber: string;
+  ownerId: string;
+  ownerName: string;
+  address: string;
+  category: 'RESIDENTIAL' | 'COMMERCIAL' | 'INDUSTRIAL' | 'AGRICULTURAL';
+  builtUpArea: number;
+  zone: string;
+  verificationStatus: 'PENDING' | 'VERIFIED' | 'RESUBMISSION_REQUIRED' | 'REJECTED';
+  documentReference: string;
+  latitude?: number;
+  longitude?: number;
+  constructionYear?: number;
+  registrationDate: string;
+}
+
+export interface ITaxAssessment {
+  id: string;
+  assessmentNumber: string;
+  propertyId: string;
+  assessmentYear: string;
+  category: string;
+  builtUpArea: number;
+  appliedRatePerSqFt: number;
+  baseTax: number;
+  penalty: number;
+  discount: number;
+  totalTax: number;
+  amountPaid: number;
+  outstandingBalance: number;
+  status: 'DRAFT' | 'APPROVED' | 'PARTIALLY_PAID' | 'PAID' | 'OVERDUE';
+  dueDate: string;
+}
+
+export interface ITaxPayment {
+  id: string;
+  assessmentId: string;
+  amountPaid: number;
+  paymentDate: string;
+  paymentMethod: string;
+  transactionId: string;
+  paymentStatus: 'SUCCESS' | 'FAILED' | 'PENDING';
+  receiptNumber: string;
+}
+
+export interface IGrievance {
+  id: string;
+  grievanceNumber: string;
+  propertyId?: string;
+  citizenId: string;
+  subject: string;
+  description: string;
+  priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  status: 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED';
+  resolutionComments?: string;
+  resolutionDate?: string;
+  createdAt: string;
+}
+
+export interface IReassessment {
+  id: string;
+  requestNumber: string;
+  propertyId: string;
+  originalAssessmentId?: string;
+  requestedChange: string;
+  supportingReason: string;
+  approvalStatus: 'SUBMITTED' | 'UNDER_REVIEW' | 'RECOMMENDED' | 'APPROVED' | 'REJECTED';
+  decisionComments?: string;
+  createdAt: string;
+}
+
+export interface IDashboardMetrics {
+  totalProperties: number;
+  verifiedProperties: number;
+  pendingVerifications: number;
+  totalTaxAssessed: number;
+  totalRevenueCollected: number;
+  totalOutstandingDues: number;
+  collectionEfficiencyRate: number;
+  openGrievances: number;
+}
+
+
+========== .\server\src\repositories\ICivicTaxRepository.ts ==========
+// server/src/repositories/ICivicTaxRepository.ts
+import { IProperty, ITaxAssessment, ITaxPayment, IGrievance, IReassessment, IDashboardMetrics } from './types.js';
+
+export interface ICivicTaxRepository {
+  // Properties
+  listProperties(filter?: { category?: string; zone?: string; status?: string }): Promise<IProperty[]>;
+  getPropertyById(id: string): Promise<IProperty | null>;
+  createProperty(property: Omit<IProperty, 'id' | 'registrationDate'>): Promise<IProperty>;
+  updatePropertyStatus(id: string, status: IProperty['verificationStatus']): Promise<IProperty>;
+
+  // Assessments
+  listAssessments(propertyId?: string): Promise<ITaxAssessment[]>;
+  getAssessmentById(id: string): Promise<ITaxAssessment | null>;
+  createAssessment(assessment: Omit<ITaxAssessment, 'id'>): Promise<ITaxAssessment>;
+
+  // Payments
+  listPayments(assessmentId?: string): Promise<ITaxPayment[]>;
+  createPayment(payment: Omit<ITaxPayment, 'id' | 'receiptNumber'>): Promise<{ payment: ITaxPayment; assessment: ITaxAssessment }>;
+
+  // Grievances
+  listGrievances(citizenId?: string): Promise<IGrievance[]>;
+  createGrievance(grievance: Omit<IGrievance, 'id' | 'grievanceNumber' | 'createdAt'>): Promise<IGrievance>;
+  resolveGrievance(id: string, comments: string): Promise<IGrievance>;
+
+  // Reassessments
+  listReassessments(propertyId?: string): Promise<IReassessment[]>;
+  createReassessment(reassessment: Omit<IReassessment, 'id' | 'requestNumber' | 'createdAt'>): Promise<IReassessment>;
+
+  // Dashboard Metrics
+  getDashboardMetrics(): Promise<IDashboardMetrics>;
+}
+
+
+========== .\server\src\repositories\ServiceFactory.ts ==========
+
+import { ICivicTaxRepository } from './ICivicTaxRepository.js';
+import { LocalRepository } from './LocalRepository.js';
+import { SalesforceRepository } from './SalesforceRepository.js';
+import { SalesforceSessionData } from '../types/index.js';
+
+export class BackendServiceFactory {
+  public static getRepository(
+    session?: SalesforceSessionData
+  ): ICivicTaxRepository {
+    if (session?.accessToken && session?.instanceUrl) {
+      return new SalesforceRepository(session);
+    }
+
+    return new LocalRepository();
+  }
+}
+
+
+========== .\server\src\modules\municipalRoutes.ts ==========
+
+// server/src/modules/municipalRoutes.ts
+
+import { Router, Request, Response } from 'express';
+import { BackendServiceFactory } from '../repositories/ServiceFactory.js';
+import { config } from '../config/index.js';
+
+export const municipalApiRouter = Router();
+
+const getRequestRepository = (req: Request) =>
+  BackendServiceFactory.getRepository(req.session.salesforceSession);
+
+// ============================================================
+// 1. HEALTH & SYSTEM STATUS
+// ============================================================
+
+// GET /api/health
+municipalApiRouter.get('/api/health', (req: Request, res: Response) => {
+  res.json({
+    status: 'HEALTHY',
+    service: 'CivicTax Municipal Backend Gateway',
+    timestamp: new Date().toISOString(),
+    dataProvider: 'LocalRepository (Authoritative In-Memory Schema)',
+  });
+});
+
+// GET /api/salesforce/health
+municipalApiRouter.get('/api/salesforce/health', (req: Request, res: Response) => {
+  const sfSession = req.session.salesforceSession;
+
+  res.json({
+    status: 'HEALTHY',
+    service: 'CivicTax Salesforce Gateway',
+    salesforceConnected: Boolean(sfSession && sfSession.accessToken),
+    apiVersion: config.salesforce.apiVersion,
+    loginUrl: config.salesforce.loginUrl,
+    orgId: sfSession ? sfSession.orgId : null,
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// ============================================================
+// 2. PROPERTIES
+// ============================================================
+
+// GET /api/properties
+municipalApiRouter.get('/api/properties', async (req: Request, res: Response) => {
+  try {
+    const { category, zone, status } = req.query;
+
+    const properties = await getRequestRepository(req).listProperties({
+      category: category as string,
+      zone: zone as string,
+      status: status as any,
+    });
+
+    res.json({
+      success: true,
+      count: properties.length,
+      data: properties,
+    });
+  } catch (err: any) {
+    res.status(500).json({
+      success: false,
+      error: err.message,
+    });
+  }
+});
+
+// POST /api/properties
+municipalApiRouter.post('/api/properties', async (req: Request, res: Response) => {
+  try {
+    const {
+      propertyNumber,
+      address,
+      category,
+      builtUpArea,
+      zone,
+      documentReference,
+      constructionYear,
+      latitude,
+      longitude,
+      ownerId,
+      ownerName,
+    } = req.body;
+
+    // Validate mandatory registration fields.
+    // propertyNumber is optional because the backend generates it.
+    if (!address || !category || builtUpArea === undefined || builtUpArea === null || builtUpArea === '') {
+      res.status(400).json({
+        success: false,
+        error: 'Missing mandatory property registration fields',
+      });
+      return;
+    }
+
+    const area = Number(builtUpArea);
+
+    if (!Number.isFinite(area) || area <= 0) {
+      res.status(400).json({
+        success: false,
+        error: 'Built-up area must be strictly greater than zero',
+      });
+      return;
+    }
+
+    const generatedPropertyNumber =
+      propertyNumber ||
+      `CT-${new Date().getFullYear()}-${Date.now()}`;
+
+    const created = await getRequestRepository(req).createProperty({
+      propertyNumber: generatedPropertyNumber,
+      ownerId: ownerId || 'usr-citizen-01',
+      ownerName: ownerName || 'Rajesh Kumar Sharma',
+      address: String(address).trim(),
+      category,
+      builtUpArea: area,
+      zone: zone || 'Z-CENTRAL',
+      verificationStatus: 'PENDING',
+      documentReference: documentReference || 'DOC-PENDING',
+      constructionYear: constructionYear
+        ? Number(constructionYear)
+        : undefined,
+      latitude: latitude !== undefined ? Number(latitude) : undefined,
+      longitude: longitude !== undefined ? Number(longitude) : undefined,
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Property registered successfully',
+      data: created,
+    });
+  } catch (err: any) {
+    res.status(400).json({
+      success: false,
+      error: err.message,
+    });
+  }
+});
+
+// GET /api/properties/:id
+municipalApiRouter.get('/api/properties/:id', async (req: Request, res: Response) => {
+  try {
+    const prop = await getRequestRepository(req).getPropertyById(req.params.id);
+
+    if (!prop) {
+      res.status(404).json({
+        success: false,
+        error: 'Property not found',
+      });
+      return;
+    }
+
+    res.json({
+      success: true,
+      data: prop,
+    });
+  } catch (err: any) {
+    res.status(500).json({
+      success: false,
+      error: err.message,
+    });
+  }
+});
+
+// PATCH /api/properties/:id/verify
+municipalApiRouter.patch('/api/properties/:id/verify', async (req: Request, res: Response) => {
+  try {
+    const { status } = req.body;
+
+    const updated = await getRequestRepository(req).updatePropertyStatus(
+      req.params.id,
+      status
+    );
+
+    res.json({
+      success: true,
+      data: updated,
+    });
+  } catch (err: any) {
+    res.status(400).json({
+      success: false,
+      error: err.message,
+    });
+  }
+});
+
+// ============================================================
+// 3. ASSESSMENTS
+// ============================================================
+
+// GET /api/assessments
+municipalApiRouter.get('/api/assessments', async (req: Request, res: Response) => {
+  try {
+    const { propertyId } = req.query;
+
+    const asms = await getRequestRepository(req).listAssessments(
+      propertyId as string
+    );
+
+    res.json({
+      success: true,
+      count: asms.length,
+      data: asms,
+    });
+  } catch (err: any) {
+    res.status(500).json({
+      success: false,
+      error: err.message,
+    });
+  }
+});
+
+// POST /api/assessments
+municipalApiRouter.post('/api/assessments', async (req: Request, res: Response) => {
+  try {
+    const {
+      propertyId,
+      assessmentYear,
+      category,
+      builtUpArea,
+      appliedRatePerSqFt,
+    } = req.body;
+
+    if (!propertyId || !assessmentYear || !builtUpArea) {
+      res.status(400).json({
+        success: false,
+        error: 'Missing mandatory assessment parameters',
+      });
+      return;
+    }
+
+    const rate = Number(appliedRatePerSqFt) || 10;
+    const area = Number(builtUpArea);
+
+    const baseTax = Math.round(area * rate * 100) / 100;
+    const discount = Math.round(baseTax * 0.05 * 100) / 100;
+    const penalty = 0;
+    const totalTax = Math.round((baseTax - discount) * 100) / 100;
+
+    const asm = await getRequestRepository(req).createAssessment({
+      assessmentNumber: `CT-ASM-${Date.now()}`,
+      propertyId,
+      assessmentYear,
+      category: category || 'RESIDENTIAL',
+      builtUpArea: area,
+      appliedRatePerSqFt: rate,
+      baseTax,
+      penalty,
+      discount,
+      totalTax,
+      amountPaid: 0,
+      outstandingBalance: totalTax,
+      status: 'APPROVED',
+      dueDate: new Date(
+        Date.now() + 60 * 24 * 60 * 60 * 1000
+      ).toISOString().split('T')[0],
+    });
+
+    res.status(201).json({
+      success: true,
+      data: asm,
+    });
+  } catch (err: any) {
+    res.status(400).json({
+      success: false,
+      error: err.message,
+    });
+  }
+});
+
+// GET /api/assessments/:id
+municipalApiRouter.get('/api/assessments/:id', async (req: Request, res: Response) => {
+  try {
+    const asm = await getRequestRepository(req).getAssessmentById(req.params.id);
+
+    if (!asm) {
+      res.status(404).json({
+        success: false,
+        error: 'Assessment not found',
+      });
+      return;
+    }
+
+    res.json({
+      success: true,
+      data: asm,
+    });
+  } catch (err: any) {
+    res.status(500).json({
+      success: false,
+      error: err.message,
+    });
+  }
+});
+
+// ============================================================
+// 4. PAYMENTS
+// ============================================================
+
+// GET /api/payments
+municipalApiRouter.get('/api/payments', async (req: Request, res: Response) => {
+  try {
+    const { assessmentId } = req.query;
+
+    const payments = await getRequestRepository(req).listPayments(
+      assessmentId as string
+    );
+
+    res.json({
+      success: true,
+      count: payments.length,
+      data: payments,
+    });
+  } catch (err: any) {
+    res.status(500).json({
+      success: false,
+      error: err.message,
+    });
+  }
+});
+
+// POST /api/payments
+municipalApiRouter.post('/api/payments', async (req: Request, res: Response) => {
+  try {
+    const {
+      assessmentId,
+      amountPaid,
+      paymentMethod,
+      transactionId,
+    } = req.body;
+
+    if (!assessmentId || !amountPaid || !transactionId) {
+      res.status(400).json({
+        success: false,
+        error: 'Missing required payment fields',
+      });
+      return;
+    }
+
+    const result = await getRequestRepository(req).createPayment({
+      assessmentId,
+      amountPaid: Number(amountPaid),
+      paymentMethod: paymentMethod || 'UPI',
+      transactionId,
+      paymentDate: new Date().toISOString(),
+      paymentStatus: 'SUCCESS',
+    });
+
+    res.status(201).json({
+      success: true,
+      data: result.payment,
+      assessment: result.assessment,
+    });
+  } catch (err: any) {
+    res.status(400).json({
+      success: false,
+      error: err.message,
+    });
+  }
+});
+
+// ============================================================
+// 5. GRIEVANCES
+// ============================================================
+
+// GET /api/grievances
+municipalApiRouter.get('/api/grievances', async (req: Request, res: Response) => {
+  try {
+    const { citizenId } = req.query;
+
+    const grievances = await getRequestRepository(req).listGrievances(
+      citizenId as string
+    );
+
+    res.json({
+      success: true,
+      count: grievances.length,
+      data: grievances,
+    });
+  } catch (err: any) {
+    res.status(500).json({
+      success: false,
+      error: err.message,
+    });
+  }
+});
+
+// POST /api/grievances
+municipalApiRouter.post('/api/grievances', async (req: Request, res: Response) => {
+  try {
+    const {
+      propertyId,
+      citizenId,
+      subject,
+      description,
+      priority,
+    } = req.body;
+
+    if (!subject || !description) {
+      res.status(400).json({
+        success: false,
+        error: 'Subject and description are mandatory',
+      });
+      return;
+    }
+
+    const grv = await getRequestRepository(req).createGrievance({
+      propertyId,
+      citizenId: citizenId || 'usr-citizen-01',
+      subject,
+      description,
+      priority: priority || 'MEDIUM',
+      status: 'OPEN',
+    });
+
+    res.status(201).json({
+      success: true,
+      data: grv,
+    });
+  } catch (err: any) {
+    res.status(400).json({
+      success: false,
+      error: err.message,
+    });
+  }
+});
+
+// ============================================================
+// 6. REASSESSMENTS
+// ============================================================
+
+// GET /api/reassessments
+municipalApiRouter.get('/api/reassessments', async (req: Request, res: Response) => {
+  try {
+    const { propertyId } = req.query;
+
+    const items = await getRequestRepository(req).listReassessments(
+      propertyId as string
+    );
+
+    res.json({
+      success: true,
+      count: items.length,
+      data: items,
+    });
+  } catch (err: any) {
+    res.status(500).json({
+      success: false,
+      error: err.message,
+    });
+  }
+});
+
+// POST /api/reassessments
+municipalApiRouter.post('/api/reassessments', async (req: Request, res: Response) => {
+  try {
+    const {
+      propertyId,
+      originalAssessmentId,
+      requestedChange,
+      supportingReason,
+    } = req.body;
+
+    if (!propertyId || !requestedChange) {
+      res.status(400).json({
+        success: false,
+        error: 'Property ID and requested changes are mandatory',
+      });
+      return;
+    }
+
+    const item = await getRequestRepository(req).createReassessment({
+      propertyId,
+      originalAssessmentId,
+      requestedChange,
+      supportingReason: supportingReason || 'Municipal survey revision',
+      approvalStatus: 'SUBMITTED',
+    });
+
+    res.status(201).json({
+      success: true,
+      data: item,
+    });
+  } catch (err: any) {
+    res.status(400).json({
+      success: false,
+      error: err.message,
+    });
+  }
+});
+
+// ============================================================
+// 7. DASHBOARD
+// ============================================================
+
+// GET /api/dashboard
+municipalApiRouter.get('/api/dashboard', async (req: Request, res: Response) => {
+  try {
+    const metrics = await getRequestRepository(req).getDashboardMetrics();
+
+    res.json({
+      success: true,
+      data: metrics,
+    });
+  } catch (err: any) {
+    res.status(500).json({
+      success: false,
+      error: err.message,
+    });
+  }
+});
+
+
+========== .\server\src\routes\authRoutes.ts ==========
+import { Router, Request, Response } from 'express';
+import { config } from '../config/index.js';
+import { PKCEUtils } from '../utils/pkce.js';
+import { SalesforceClient } from '../services/salesforceClient.js';
+import { SalesforceSessionData, SalesforceStatusResponse, CivicTaxSessionUser } from '../types/index.js';
+
+// Augment express-session type
+declare module 'express-session' {
+  interface SessionData {
+    oauthState?: string;
+    codeVerifier?: string;
+    salesforceSession?: SalesforceSessionData;
+    civicTaxUser?: CivicTaxSessionUser;
+  }
+}
+
+export const authRouter = Router();
+
+// Standard Municipal User Database for Server-Side Authentication
+const REGISTERED_USERS: Record<string, { passwordHash: string; user: CivicTaxSessionUser }> = {
+  'admin@civictax.demo': {
+    passwordHash: 'Admin@123',
+    user: { id: 'usr-admin-01', email: 'admin@civictax.demo', role: 'ADMIN', name: 'Pallapu Dileep Kumar' },
+  },
+  'officer@civictax.demo': {
+    passwordHash: 'Officer@123',
+    user: { id: 'usr-officer-01', email: 'officer@civictax.demo', role: 'OFFICER', name: 'Ananya Deshmukh' },
+  },
+  'citizen@civictax.demo': {
+    passwordHash: 'Citizen@123',
+    user: { id: 'usr-citizen-01', email: 'citizen@civictax.demo', role: 'CITIZEN', name: 'Rajesh Kumar Sharma' },
+  },
+};
+
+// POST /api/auth/login - Server-Side CivicTax User Login
+authRouter.post('/api/auth/login', (req: Request, res: Response) => {
+  const { email, password } = req.body;
+  if (!email || !password) {
+    res.status(400).json({ success: false, error: 'Email and password are required' });
+    return;
+  }
+
+  const record = REGISTERED_USERS[email.toLowerCase().trim()];
+  if (!record || record.passwordHash !== password) {
+    res.status(401).json({ success: false, error: 'Invalid email or password' });
+    return;
+  }
+
+  // Set server-verified user identity in HTTP-only session cookie
+  req.session.civicTaxUser = record.user;
+  res.json({ success: true, user: record.user });
+});
+
+// GET /api/auth/me - Current Authenticated User Session
+authRouter.get('/api/auth/me', (req: Request, res: Response) => {
+  if (!req.session.civicTaxUser) {
+    res.status(401).json({ authenticated: false, user: null });
+    return;
+  }
+  res.json({ authenticated: true, user: req.session.civicTaxUser });
+});
+
+// POST /api/auth/logout - Server-Side CivicTax User Logout
+authRouter.post('/api/auth/logout', (req: Request, res: Response) => {
+  delete req.session.civicTaxUser;
+  res.json({ success: true, message: 'Logged out successfully' });
+});
+
+// GET /auth/salesforce - Initiate OAuth 2.0 PKCE flow
+authRouter.get('/auth/salesforce', (req: Request, res: Response) => {
+  if (!config.salesforce.clientId) {
+    res.status(500).json({
+      error: 'Salesforce Client ID not configured in server environment. Please set SF_CLIENT_ID.',
+    });
+    return;
+  }
+
+  const state = PKCEUtils.generateState();
+  const codeVerifier = PKCEUtils.generateCodeVerifier();
+  const codeChallenge = PKCEUtils.generateCodeChallenge(codeVerifier);
+
+  // Store state and verifier securely in server-side session
+  req.session.oauthState = state;
+  req.session.codeVerifier = codeVerifier;
+
+  const authParams = new URLSearchParams({
+    response_type: 'code',
+    client_id: config.salesforce.clientId,
+    redirect_uri: config.salesforce.redirectUri,
+    code_challenge: codeChallenge,
+    code_challenge_method: 'S256',
+    state: state,
+    scope: 'api refresh_token web',
+    prompt: 'login consent',
+  });
+
+  const authorizationUrl = `${config.salesforce.loginUrl}/services/oauth2/authorize?${authParams.toString()}`;
+  res.redirect(authorizationUrl);
+});
+
+// GET /auth/salesforce/callback - OAuth 2.0 PKCE Callback Handler
+authRouter.get('/auth/salesforce/callback', async (req: Request, res: Response) => {
+  const { code, state, error, error_description } = req.query;
+
+  if (error) {
+    res.redirect(`${config.frontendUrl}/admin/salesforce?error=${encodeURIComponent(String(error_description || error))}`);
+    return;
+  }
+
+  if (!code || !state) {
+    res.redirect(`${config.frontendUrl}/admin/salesforce?error=Missing_Code_Or_State`);
+    return;
+  }
+
+  // Validate state against CSRF
+  if (state !== req.session.oauthState) {
+    res.redirect(`${config.frontendUrl}/admin/salesforce?error=Invalid_OAuth_State`);
+    return;
+  }
+
+  const verifier = req.session.codeVerifier;
+  if (!verifier) {
+    res.redirect(`${config.frontendUrl}/admin/salesforce?error=Missing_Code_Verifier`);
+    return;
+  }
+
+  try {
+    const tokenData = await SalesforceClient.exchangeCodeForToken(String(code), verifier);
+
+    // Fetch user identity
+    let username = '';
+    let displayName = '';
+    let orgId = '';
+    let userId = '';
+
+    try {
+      const identity = await SalesforceClient.fetchIdentity(tokenData.id, tokenData.access_token);
+      username = identity.username;
+      displayName = identity.display_name;
+      orgId = identity.organization_id;
+      userId = identity.user_id;
+    } catch {
+      // Identity URL parsing fallback
+      const segments = tokenData.id.split('/');
+      orgId = segments[segments.length - 2] || '';
+      userId = segments[segments.length - 1] || '';
+    }
+
+    const sessionData: SalesforceSessionData = {
+      accessToken: tokenData.access_token,
+      refreshToken: tokenData.refresh_token,
+      instanceUrl: tokenData.instance_url,
+      identityUrl: tokenData.id,
+      userId,
+      orgId,
+      username,
+      displayName,
+      connectedAt: new Date().toISOString(),
+      lastActiveAt: new Date().toISOString(),
+    };
+
+    req.session.salesforceSession = sessionData;
+    delete req.session.oauthState;
+    delete req.session.codeVerifier;
+
+    res.redirect(`${config.frontendUrl}/admin/salesforce?status=success`);
+  } catch (err: any) {
+    console.error('Salesforce OAuth Error:', err);
+    res.redirect(`${config.frontendUrl}/admin/salesforce?error=${encodeURIComponent(err.message || 'Authentication_Failed')}`);
+  }
+});
+
+// GET /api/salesforce/status - Retrieve Connection Status (Without exposing any secrets or tokens)
+authRouter.get('/api/salesforce/status', (req: Request, res: Response) => {
+  const sfSession = req.session.salesforceSession;
+
+  if (!sfSession || !sfSession.accessToken) {
+    const response: SalesforceStatusResponse = {
+      connected: false,
+      apiVersion: config.salesforce.apiVersion,
+      authMode: 'PKCE_EXTERNAL_CLIENT_APP',
+    };
+    res.json(response);
+    return;
+  }
+
+  const response: SalesforceStatusResponse = {
+    connected: true,
+    instanceUrl: sfSession.instanceUrl,
+    orgId: sfSession.orgId,
+    username: sfSession.username,
+    displayName: sfSession.displayName,
+    apiVersion: config.salesforce.apiVersion,
+    authMode: 'PKCE_EXTERNAL_CLIENT_APP',
+    lastSync: sfSession.lastActiveAt,
+  };
+  res.json(response);
+});
+
+// POST /auth/salesforce/logout - Revoke Session & Disconnect
+authRouter.post('/auth/salesforce/logout', (req: Request, res: Response) => {
+  delete req.session.salesforceSession;
+  delete req.session.oauthState;
+  delete req.session.codeVerifier;
+
+  req.session.save((err) => {
+    if (err) {
+      res.status(500).json({ error: 'Failed to clear Salesforce session' });
+      return;
+    }
+
+    res.json({
+      success: true,
+      message: 'Salesforce disconnected. CivicTax login remains active.',
+    });
+  });
+});
+
+
+
+========== .\server\src\services\salesforceClient.ts ==========
+import { config } from '../config/index.js';
+import { SalesforceOAuthTokenResponse, SalesforceSessionData } from '../types/index.js';
+
+export class SalesforceClient {
+  // Exchange PKCE Authorization Code for Access and Refresh Tokens
+  public static async exchangeCodeForToken(
+    code: string,
+    codeVerifier: string
+  ): Promise<SalesforceOAuthTokenResponse> {
+    const tokenEndpoint = `${config.salesforce.loginUrl}/services/oauth2/token`;
+
+    const bodyParams = new URLSearchParams({
+      grant_type: 'authorization_code',
+      code: code,
+      client_id: config.salesforce.clientId,
+      redirect_uri: config.salesforce.redirectUri,
+      code_verifier: codeVerifier,
+    });
+
+    if (config.salesforce.clientSecret) {
+      bodyParams.append('client_secret', config.salesforce.clientSecret);
+    }
+
+    const response = await fetch(tokenEndpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Accept: 'application/json',
+      },
+      body: bodyParams.toString(),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Salesforce Token Exchange Failed (${response.status}): ${errText}`);
+    }
+
+    const tokenData = (await response.json()) as SalesforceOAuthTokenResponse;
+    return tokenData;
+  }
+
+  // Refresh expired Access Token using Refresh Token
+  public static async refreshToken(refreshToken: string): Promise<SalesforceOAuthTokenResponse> {
+    const tokenEndpoint = `${config.salesforce.loginUrl}/services/oauth2/token`;
+
+    const bodyParams = new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+      client_id: config.salesforce.clientId,
+    });
+
+    if (config.salesforce.clientSecret) {
+      bodyParams.append('client_secret', config.salesforce.clientSecret);
+    }
+
+    const response = await fetch(tokenEndpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Accept: 'application/json',
+      },
+      body: bodyParams.toString(),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Salesforce Token Refresh Failed (${response.status}): ${errText}`);
+    }
+
+    return (await response.json()) as SalesforceOAuthTokenResponse;
+  }
+
+  // Fetch Salesforce User Identity (User ID, Org ID, Username, Display Name)
+  public static async fetchIdentity(identityUrl: string, accessToken: string) {
+    const response = await fetch(identityUrl, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch Salesforce identity (${response.status})`);
+    }
+
+    return await response.json();
+  }
+
+  // Execute Apex REST API Call
+  public static async callApexRest(
+    session: SalesforceSessionData,
+    endpointPath: string,
+    method: 'GET' | 'POST' | 'PATCH' | 'DELETE' = 'GET',
+    body?: any
+  ): Promise<any> {
+    const cleanPath = endpointPath.startsWith('/') ? endpointPath.slice(1) : endpointPath;
+    const url = `${session.instanceUrl}/services/apexrest/civictax/v1/${cleanPath}`;
+
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${session.accessToken}`,
+      Accept: 'application/json',
+    };
+
+    if (body && (method === 'POST' || method === 'PATCH')) {
+      headers['Content-Type'] = 'application/json';
+    }
+
+    const response = await fetch(url, {
+  method,
+  headers,
+  ...(body && ['POST', 'PATCH'].includes(method)
+    ? { body: JSON.stringify(body) }
+    : {}),
+});
+
+    if (response.status === 401 && session.refreshToken) {
+      // Refresh token and retry once
+      const refreshed = await this.refreshToken(session.refreshToken);
+      session.accessToken = refreshed.access_token;
+      headers['Authorization'] = `Bearer ${session.accessToken}`;
+
+      const retryRes = await fetch(url, {
+  method,
+  headers,
+  ...(body && ['POST', 'PATCH'].includes(method)
+    ? { body: JSON.stringify(body) }
+    : {}),
+});
+
+      if (!retryRes.ok) {
+        const err = await retryRes.text();
+        throw new Error(`Apex REST Error after token refresh (${retryRes.status}): ${err}`);
+      }
+      return await retryRes.json();
+    }
+
+    if (!response.ok) {
+      const err = await response.text();
+      throw new Error(`Apex REST API Error (${response.status}): ${err}`);
+    }
+
+    return await response.json();
+  }
+}
+
+
+========== .\salesforce\force-app\main\default\classes\CivicTaxSecurityService.cls ==========
+/**
+ * @description Enterprise Security & Authorization Enforcer for CivicTax Custom Objects
+ * @group CivicTax 6.0 & 10.0
+ */
+public with sharing class CivicTaxSecurityService {
+
+    public class SecurityException extends Exception {}
+
+    public static Boolean isSystemAdmin() {
+        List<Profile> profs = [SELECT Name FROM Profile WHERE Id = :UserInfo.getProfileId() LIMIT 1];
+        return (!profs.isEmpty() && profs[0].Name == 'System Administrator');
+    }
+
+    /**
+     * @description Checks if running user has a specific Permission Set assigned
+     */
+    public static Boolean hasPermissionSet(String permSetName) {
+        List<PermissionSetAssignment> psa = [
+            SELECT Id 
+            FROM PermissionSetAssignment 
+            WHERE AssigneeId = :UserInfo.getUserId() 
+              AND PermissionSet.Name = :permSetName 
+            LIMIT 1
+        ];
+        return !psa.isEmpty();
+    }
+
+    /**
+     * @description Checks if running user has any of the specified Permission Sets assigned
+     */
+    public static Boolean hasAnyPermissionSet(Set<String> permSetNames) {
+        List<PermissionSetAssignment> psa = [
+            SELECT Id 
+            FROM PermissionSetAssignment 
+            WHERE AssigneeId = :UserInfo.getUserId() 
+              AND PermissionSet.Name IN :permSetNames 
+            LIMIT 1
+        ];
+        return !psa.isEmpty();
+    }
+
+    /**
+     * @description Checks if running user is a Municipal Administrator
+     */
+    public static Boolean isAdmin() {
+        if (isSystemAdmin()) {
+            return true;
+        }
+        return hasPermissionSet('CivicTax_Admin');
+    }
+
+    /**
+     * @description Checks if running user has general Municipal Officer or Admin authorization
+     */
+    public static Boolean isGeneralOfficerOrAdmin() {
+        if (isSystemAdmin()) {
+            return true;
+        }
+        return hasAnyPermissionSet(new Set<String>{ 'CivicTax_Officer', 'CivicTax_Admin' });
+    }
+
+    public static Boolean isOfficerOrAdmin() {
+        return isGeneralOfficerOrAdmin();
+    }
+
+    /**
+     * @description Operation-specific: Property verification (Admin, Officer, or Verification Specialist)
+     */
+    public static Boolean canVerifyProperty() {
+        if (isSystemAdmin()) return true;
+        return hasAnyPermissionSet(new Set<String>{ 'CivicTax_Admin', 'CivicTax_Officer', 'CivicTax_Verification' });
+    }
+
+    /**
+     * @description Operation-specific: Grievance resolution (Admin, Officer, or Grievance Specialist)
+     */
+    public static Boolean canResolveGrievance() {
+        if (isSystemAdmin()) return true;
+        return hasAnyPermissionSet(new Set<String>{ 'CivicTax_Admin', 'CivicTax_Officer', 'CivicTax_Grievance' });
+    }
+
+    /**
+     * @description Operation-specific: Reassessment approval (Admin, Officer, or Reassessment Specialist)
+     */
+    public static Boolean canApproveReassessment() {
+        if (isSystemAdmin()) return true;
+        return hasAnyPermissionSet(new Set<String>{ 'CivicTax_Admin', 'CivicTax_Officer', 'CivicTax_Reassessment' });
+    }
+
+    /**
+     * @description Operation-specific: Assessment management (Admin, Officer, or Assessment Specialist)
+     */
+    public static Boolean canManageAssessments() {
+        if (isSystemAdmin()) return true;
+        return hasAnyPermissionSet(new Set<String>{ 'CivicTax_Admin', 'CivicTax_Officer', 'CivicTax_Assessment' });
+    }
+
+    /**
+     * @description Operation-specific: Executive dashboard analytics (Admin, Officer, Auditor, or Revenue Specialist)
+     */
+    public static Boolean canViewExecutiveDashboard() {
+        if (isSystemAdmin()) return true;
+        return hasAnyPermissionSet(new Set<String>{ 'CivicTax_Admin', 'CivicTax_Officer', 'CivicTax_Auditor', 'CivicTax_Revenue' });
+    }
+
+    /**
+     * @description Enforces general municipal officer or admin authorization
+     */
+    public static void requireOfficerOrAdmin() {
+        if (!isGeneralOfficerOrAdmin()) {
+            throw new SecurityException('Access Denied: Operation restricted to Municipal Officers and Administrators.');
+        }
+    }
+
+    public static void requireAdmin() {
+        if (!isAdmin()) {
+            throw new SecurityException('Access Denied: Operation restricted to Municipal Administrators.');
+        }
+    }
+
+    public static void requireCanVerifyProperty() {
+        if (!canVerifyProperty()) {
+            throw new SecurityException('Access Denied: Operation restricted to Property Verification Officers and Administrators.');
+        }
+    }
+
+    public static void requireCanResolveGrievance() {
+        if (!canResolveGrievance()) {
+            throw new SecurityException('Access Denied: Operation restricted to Grievance Redressal Officers and Administrators.');
+        }
+    }
+
+    public static void requireCanApproveReassessment() {
+        if (!canApproveReassessment()) {
+            throw new SecurityException('Access Denied: Operation restricted to Valuation Reassessment Officers and Administrators.');
+        }
+    }
+
+    public static void requireCanManageAssessments() {
+        if (!canManageAssessments()) {
+            throw new SecurityException('Access Denied: Operation restricted to Municipal Assessment Officers and Administrators.');
+        }
+    }
+
+    public static void requireCanViewExecutiveDashboard() {
+        if (!canViewExecutiveDashboard()) {
+            throw new SecurityException('Access Denied: Operation restricted to Municipal Executive, Revenue, and Audit Officers.');
+        }
+    }
+
+    /**
+     * @description Validates if running user is allowed to access specific Property
+     * Prioritizes stable Salesforce relationships (OwnerId, ContactId) over email
+     */
+    public static Boolean canAccessProperty(Id propertyId) {
+        if (propertyId == null) return false;
+        if (canVerifyProperty()) return true;
+
+        List<Property__c> props = [
+            SELECT Id, OwnerId, Property_Owner__c, Property_Owner__r.Email 
+            FROM Property__c 
+            WHERE Id = :propertyId 
+            LIMIT 1
+        ];
+        if (props.isEmpty()) return false;
+        Property__c p = props[0];
+
+        Id currentUserId = UserInfo.getUserId();
+        // 1. Direct standard Salesforce record ownership
+        if (p.OwnerId == currentUserId) {
+            return true;
+        }
+
+        // 2. Direct Contact relationship: Check if running user's ContactId matches Property_Owner__c
+        List<User> runningUsers = [SELECT ContactId, Email FROM User WHERE Id = :currentUserId LIMIT 1];
+        if (!runningUsers.isEmpty()) {
+            User u = runningUsers[0];
+            if (u.ContactId != null && p.Property_Owner__c != null && u.ContactId == p.Property_Owner__c) {
+                return true;
+            }
+            // 3. Secondary fallback only when Property_Owner__c lookup exists and contact email matches user email
+            if (p.Property_Owner__c != null && p.Property_Owner__r.Email != null && u.Email != null && p.Property_Owner__r.Email.equalsIgnoreCase(u.Email)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public static void requireCanAccessProperty(Id propertyId) {
+        if (!canAccessProperty(propertyId)) {
+            throw new SecurityException('Access Denied: You do not have permission to access or modify this property.');
+        }
+    }
+
+    /**
+     * @description Validates if running user is allowed to access specific Tax Assessment
+     */
+    public static Boolean canAccessAssessment(Id assessmentId) {
+        if (assessmentId == null) return false;
+        if (canManageAssessments()) return true;
+
+        List<Tax_Assessment__c> assts = [
+            SELECT Id, OwnerId, Property__c, Property__r.OwnerId, Property__r.Property_Owner__c, Property__r.Property_Owner__r.Email 
+            FROM Tax_Assessment__c 
+            WHERE Id = :assessmentId 
+            LIMIT 1
+        ];
+        if (assts.isEmpty()) return false;
+        Tax_Assessment__c a = assts[0];
+
+        Id currentUserId = UserInfo.getUserId();
+        if (a.OwnerId == currentUserId) {
+            return true;
+        }
+        if (a.Property__c != null) {
+            if (a.Property__r.OwnerId == currentUserId) {
+                return true;
+            }
+            List<User> runningUsers = [SELECT ContactId, Email FROM User WHERE Id = :currentUserId LIMIT 1];
+            if (!runningUsers.isEmpty()) {
+                User u = runningUsers[0];
+                if (u.ContactId != null && a.Property__r.Property_Owner__c != null && u.ContactId == a.Property__r.Property_Owner__c) {
+                    return true;
+                }
+                if (a.Property__r.Property_Owner__c != null && a.Property__r.Property_Owner__r.Email != null && u.Email != null && a.Property__r.Property_Owner__r.Email.equalsIgnoreCase(u.Email)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    public static void requireCanAccessAssessment(Id assessmentId) {
+        if (!canAccessAssessment(assessmentId)) {
+            throw new SecurityException('Access Denied: You do not have permission to access or modify this tax assessment.');
+        }
+    }
+
+    public static Boolean canReadObject(String sObjectName) {
+        Schema.SObjectType targetType = Schema.getGlobalDescribe().get(sObjectName);
+        if (targetType == null) return false;
+        return targetType.getDescribe().isAccessible();
+    }
+
+    public static Boolean canCreateObject(String sObjectName) {
+        Schema.SObjectType targetType = Schema.getGlobalDescribe().get(sObjectName);
+        if (targetType == null) return false;
+        return targetType.getDescribe().isCreateable();
+    }
+
+    public static Boolean canUpdateObject(String sObjectName) {
+        Schema.SObjectType targetType = Schema.getGlobalDescribe().get(sObjectName);
+        if (targetType == null) return false;
+        return targetType.getDescribe().isUpdateable();
+    }
+
+    public static List<SObject> sanitizeRecords(AccessType accessMode, List<SObject> records) {
+        if (records == null || records.isEmpty()) return records;
+        SObjectAccessDecision decision = Security.stripInaccessible(accessMode, records);
+        return decision.getRecords();
+    }
+}
+
+
+========== .\salesforce\force-app\main\default\classes\PropertyService.cls ==========
+// PropertyService.cls
+// CivicTax 8.0 & 10.0 Enterprise Apex Service for Property Management
+public with sharing class PropertyService {
+    public class PropertyException extends Exception {}
+
+    // Register a new property with full validation and CRUD guards
+    public static Property__c registerProperty(
+        String propertyNumber,
+        String address,
+        String category,
+        Decimal builtUpArea,
+        String zone,
+        Decimal latitude,
+        Decimal longitude,
+        String ownershipDoc,
+        Integer constructionYear
+    ) {
+        if (!CivicTaxSecurityService.canCreateObject('Property__c')) {
+            throw new CivicTaxSecurityService.SecurityException('Access Denied: Insufficient permissions to register Property.');
+        }
+
+        if (String.isBlank(propertyNumber)) {
+            throw new PropertyException('Property Number is required.');
+        }
+        if (builtUpArea == null || builtUpArea <= 0) {
+            throw new PropertyException('Built up area must be greater than zero.');
+        }
+
+        // Duplicate check
+        List<Property__c> existing = [
+            SELECT Id, Property_Number__c 
+            FROM Property__c 
+            WHERE Property_Number__c = :propertyNumber 
+            LIMIT 1
+        ];
+        if (!existing.isEmpty()) {
+            throw new PropertyException('Property with number ' + propertyNumber + ' already exists.');
+        }
+
+        Property__c prop = new Property__c(
+            Name = propertyNumber,
+            Property_Number__c = propertyNumber,
+            Property_Address__c = address,
+            Property_Category__c = category,
+            Built_Up_Area__c = builtUpArea,
+            Zone__c = zone,
+            Latitude__c = latitude,
+            Longitude__c = longitude,
+            Ownership_Document__c = ownershipDoc,
+            Construction_Year__c = constructionYear,
+            Verification_Status__c = 'PENDING',
+            Registration_Date__c = System.now()
+        );
+
+        insert prop;
+        return prop;
+    }
+
+    // Retrieve single property by Property Number or Id with strict ownership validation
+    public static Property__c getProperty(String identifier) {
+        if (String.isBlank(identifier)) {
+            throw new PropertyException('Property identifier cannot be blank.');
+        }
+
+        Boolean isSalesforceId = false;
+        try {
+            Id checkId = (Id) identifier;
+            isSalesforceId = true;
+        } catch (Exception ex) {
+            isSalesforceId = false;
+        }
+
+        List<Property__c> props;
+        if (isSalesforceId) {
+            props = [
+                SELECT Id, Name, Property_Number__c, Property_Address__c, Property_Category__c, 
+                       Built_Up_Area__c, Zone__c, Verification_Status__c, Ownership_Document__c, 
+                       Registration_Date__c, Latitude__c, Longitude__c, Construction_Year__c,
+                       OwnerId, Property_Owner__c, Property_Owner__r.Email
+                FROM Property__c 
+                WHERE Id = :identifier OR Property_Number__c = :identifier 
+                LIMIT 1
+            ];
+        } else {
+            props = [
+                SELECT Id, Name, Property_Number__c, Property_Address__c, Property_Category__c, 
+                       Built_Up_Area__c, Zone__c, Verification_Status__c, Ownership_Document__c, 
+                       Registration_Date__c, Latitude__c, Longitude__c, Construction_Year__c,
+                       OwnerId, Property_Owner__c, Property_Owner__r.Email
+                FROM Property__c 
+                WHERE Property_Number__c = :identifier 
+                LIMIT 1
+            ];
+        }
+
+        if (props.isEmpty()) {
+            throw new PropertyException('Property record not found for: ' + identifier);
+        }
+
+        // BOLA / IDOR Protection: Validate that running user can access this property
+        CivicTaxSecurityService.requireCanAccessProperty(props[0].Id);
+
+        List<Property__c> sanitized = (List<Property__c>) CivicTaxSecurityService.sanitizeRecords(AccessType.READABLE, props);
+        return sanitized[0];
+    }
+
+    // List properties with optional filters and user isolation
+    public static List<Property__c> listProperties(String category, String zone, String status) {
+        String query = 'SELECT Id, Name, Property_Number__c, Property_Address__c, Property_Category__c, ' +
+               'Built_Up_Area__c, Zone__c, Municipal_Zone__c, Verification_Status__c, ' +
+               'Registration_Date__c, Latitude__c, Longitude__c, Property_Owner__c, ' +
+               'Property_Owner__r.Name, Property_Owner__r.Email ' +
+               'FROM Property__c ';
+        List<String> conditions = new List<String>();
+
+        // Enforce user isolation if not officer/admin
+        if (!CivicTaxSecurityService.isOfficerOrAdmin()) {
+            Id currentUserId = UserInfo.getUserId();
+            String currentUserEmail = UserInfo.getUserEmail();
+            conditions.add('(OwnerId = :currentUserId OR Property_Owner__r.Email = :currentUserEmail)');
+        }
+
+        if (String.isNotBlank(category)) {
+            conditions.add('Property_Category__c = :category');
+        }
+        if (String.isNotBlank(zone)) {
+            conditions.add('Zone__c = :zone');
+        }
+        if (String.isNotBlank(status)) {
+            conditions.add('Verification_Status__c = :status');
+        }
+
+        if (!conditions.isEmpty()) {
+            query += 'WHERE ' + String.join(conditions, ' AND ') + ' ';
+        }
+
+        query += 'ORDER BY CreatedDate DESC LIMIT 100';
+
+        List<Property__c> props = Database.query(query);
+        return (List<Property__c>) CivicTaxSecurityService.sanitizeRecords(AccessType.READABLE, props);
+    }
+
+    // Update Verification Status (Officer / Admin Only)
+    public static Property__c updateVerificationStatus(String propertyId, String newStatus, String officerNotes) {
+        CivicTaxSecurityService.requireCanVerifyProperty();
+
+        if (!CivicTaxSecurityService.canUpdateObject('Property__c')) {
+            throw new CivicTaxSecurityService.SecurityException('Access Denied: Insufficient permissions to update Property verification.');
+        }
+
+        return new SystemElevatedContext().executeUpdateVerification(propertyId, newStatus, officerNotes);
+    }
+
+    /**
+     * @description Dedicated elevated execution context for authorized municipal officer property verification
+     */
+    private without sharing class SystemElevatedContext {
+        public Property__c executeUpdateVerification(String propertyId, String newStatus, String officerNotes) {
+            Property__c prop;
+            Boolean isSalesforceId = false;
+            try {
+                Id checkId = (Id) propertyId;
+                isSalesforceId = true;
+            } catch (Exception ex) {
+                isSalesforceId = false;
+            }
+
+            List<Property__c> props;
+            if (isSalesforceId) {
+                props = [
+                    SELECT Id, Verification_Status__c 
+                    FROM Property__c 
+                    WHERE Id = :propertyId OR Property_Number__c = :propertyId 
+                    LIMIT 1
+                ];
+            } else {
+                props = [
+                    SELECT Id, Verification_Status__c 
+                    FROM Property__c 
+                    WHERE Property_Number__c = :propertyId 
+                    LIMIT 1
+                ];
+            }
+
+            if (props.isEmpty()) {
+                throw new PropertyException('Property record not found for: ' + propertyId);
+            }
+
+            prop = props[0];
+            prop.Verification_Status__c = newStatus;
+            update prop;
+            return prop;
+        }
+    }
+}
+
+
+========== .\salesforce\force-app\main\default\classes\CivicTaxRestResource.cls ==========
+// CivicTaxRestResource.cls
+// CivicTax 8.0, 9.0 & 10.0 Enterprise Apex REST Resource Endpoint
+@RestResource(urlMapping='/civictax/v1/*')
+global with sharing class CivicTaxRestResource {
+
+    // GET /services/apexrest/civictax/v1/*
+    @HttpGet
+    global static void handleGet() {
+        RestRequest req = RestContext.request;
+        RestResponse res = RestContext.response;
+        res.addHeader('Content-Type', 'application/json');
+
+        String uri = req.requestURI;
+        String endpoint = uri.substringAfter('/civictax/v1/');
+
+        try {
+            if (endpoint.startsWith('health') || endpoint.startsWith('status')) {
+                Map<String, Object> health = new Map<String, Object>{
+                    'status' => 'OK',
+                    'service' => 'CivicTax Apex REST Gateway',
+                    'version' => 'v10.0',
+                    'timestamp' => System.now()
+                };
+                res.statusCode = 200;
+                res.responseBody = Blob.valueOf(JSON.serialize(health));
+            } else if (endpoint.startsWith('properties')) {
+                String sub = endpoint.substringAfter('properties');
+                if (String.isNotBlank(sub) && sub.startsWith('/')) {
+                    String propId = sub.substringAfter('/');
+                    Property__c prop;
+                    try {
+                        prop = PropertyService.getProperty(propId);
+                    } catch (CivicTaxSecurityService.SecurityException se) {
+                        res.statusCode = 403;
+                        res.responseBody = Blob.valueOf(JSON.serialize(new Map<String, String>{
+                            'error' => 'FORBIDDEN',
+                            'message' => 'Access denied: Property record is private or belongs to another citizen.'
+                        }));
+                        return;
+                    } catch (Exception pe) {
+                        if (!CivicTaxSecurityService.isOfficerOrAdmin()) {
+                            res.statusCode = 403;
+                            res.responseBody = Blob.valueOf(JSON.serialize(new Map<String, String>{
+                                'error' => 'FORBIDDEN',
+                                'message' => 'Access denied: Property record is private or belongs to another citizen.'
+                            }));
+                            return;
+                        } else {
+                            res.statusCode = 404;
+                            res.responseBody = Blob.valueOf(JSON.serialize(new Map<String, String>{
+                                'error' => 'NOT_FOUND',
+                                'message' => pe.getMessage()
+                            }));
+                            return;
+                        }
+                    }
+
+                    // Ownership validation for citizen access
+                    Boolean isPrivileged = CivicTaxSecurityService.isOfficerOrAdmin();
+                    Boolean isOwner = (prop.OwnerId == UserInfo.getUserId() || 
+                                      (prop.Property_Owner__r != null && prop.Property_Owner__r.Email == UserInfo.getUserEmail()));
+                    if (!isPrivileged && !isOwner) {
+                        res.statusCode = 403;
+                        res.responseBody = Blob.valueOf(JSON.serialize(new Map<String, String>{
+                            'error' => 'FORBIDDEN',
+                            'message' => 'Access denied: Property record belongs to another citizen.'
+                        }));
+                        return;
+                    }
+
+                    List<Property__c> sanitized = (List<Property__c>) CivicTaxSecurityService.sanitizeRecords(AccessType.READABLE, new List<Property__c>{prop});
+                    res.statusCode = 200;
+                    res.responseBody = Blob.valueOf(JSON.serialize(sanitized[0]));
+                } else {
+                    // List properties with automatic user isolation and field sanitization
+                    List<Property__c> props = PropertyService.listProperties(null, null, null);
+                    res.statusCode = 200;
+                    res.responseBody = Blob.valueOf(JSON.serialize(props));
+                }
+            } else if (endpoint.startsWith('assessments')) {
+                if (CivicTaxSecurityService.isOfficerOrAdmin()) {
+                    List<Tax_Assessment__c> asms = [
+                        SELECT Id,
+       Name,
+       Assessment_Number__c,
+       Assessment_Year__c,
+       Property__c,
+       Base_Value__c,
+       Base_Tax__c,
+       Applied_Rate_Per_Sq_Ft__c,
+       Penalty__c,
+       Discount__c,
+       Total_Tax__c,
+       Total_Amount__c,
+       Amount_Paid__c,
+       Outstanding_Amount__c,
+       Due_Date__c,
+       Assessment_Status__c
+FROM Tax_Assessment__c 
+                        ORDER BY Due_Date__c ASC 
+                        LIMIT 100
+                    ];
+                    List<Tax_Assessment__c> sanitized = (List<Tax_Assessment__c>) CivicTaxSecurityService.sanitizeRecords(AccessType.READABLE, asms);
+                    res.statusCode = 200;
+                    res.responseBody = Blob.valueOf(JSON.serialize(sanitized));
+                } else {
+                    Id currentUserId = UserInfo.getUserId();
+                    String currentUserEmail = UserInfo.getUserEmail();
+                    List<Tax_Assessment__c> citizenAsms = [
+                        SELECT Id,
+       Name,
+       Assessment_Number__c,
+       Assessment_Year__c,
+       Property__c,
+       Base_Value__c,
+       Base_Tax__c,
+       Applied_Rate_Per_Sq_Ft__c,
+       Penalty__c,
+       Discount__c,
+       Total_Tax__c,
+       Total_Amount__c,
+       Amount_Paid__c,
+       Outstanding_Amount__c,
+       Due_Date__c,
+       Assessment_Status__c
+FROM Tax_Assessment__c
+                        WHERE Property__r.OwnerId = :currentUserId OR Property__r.Property_Owner__r.Email = :currentUserEmail 
+                        ORDER BY Due_Date__c ASC 
+                        LIMIT 100
+                    ];
+                    List<Tax_Assessment__c> sanitized = (List<Tax_Assessment__c>) CivicTaxSecurityService.sanitizeRecords(AccessType.READABLE, citizenAsms);
+                    res.statusCode = 200;
+                    res.responseBody = Blob.valueOf(JSON.serialize(sanitized));
+                }
+            } else if (endpoint.startsWith('dashboard')) {
+                if (!CivicTaxSecurityService.canViewExecutiveDashboard()) {
+                    res.statusCode = 403;
+                    res.responseBody = Blob.valueOf(JSON.serialize(new Map<String, String>{
+                        'error' => 'FORBIDDEN',
+                        'message' => 'Dashboard revenue analytics restricted to Municipal Officers and Administrators.'
+                    }));
+                    return;
+                }
+
+                Map<String, Object> metrics = new Map<String, Object>();
+                metrics.put('totalProperties', [SELECT count() FROM Property__c]);
+                metrics.put('verifiedProperties', [SELECT count() FROM Property__c WHERE Verification_Status__c = 'VERIFIED']);
+                metrics.put('pendingProperties', [SELECT count() FROM Property__c WHERE Verification_Status__c = 'PENDING']);
+                
+                AggregateResult[] revAgg = [SELECT SUM(Total_Amount__c) totalDemand, SUM(Amount_Paid__c) totalCollected FROM Tax_Assessment__c];
+                Decimal demand = 0;
+                Decimal collected = 0;
+                if (!revAgg.isEmpty()) {
+                    demand = (Decimal) revAgg[0].get('totalDemand');
+                    collected = (Decimal) revAgg[0].get('totalCollected');
+                }
+                metrics.put('totalAssessedTax', demand != null ? demand : 0);
+                metrics.put('totalRevenueCollected', collected != null ? collected : 0);
+                res.statusCode = 200;
+                res.responseBody = Blob.valueOf(JSON.serialize(metrics));
+            } else {
+                res.statusCode = 404;
+                res.responseBody = Blob.valueOf('{"error":"ENDPOINT_NOT_FOUND"}');
+            }
+        } catch (CivicTaxSecurityService.SecurityException sex) {
+            res.statusCode = 403;
+            res.responseBody = Blob.valueOf(JSON.serialize(new Map<String, String>{
+                'error' => 'FORBIDDEN',
+                'message' => sex.getMessage()
+            }));
+        } catch (Exception ex) {
+            res.statusCode = 500;
+            res.responseBody = Blob.valueOf(JSON.serialize(new Map<String, String>{
+                'error' => 'INTERNAL_SERVER_ERROR',
+                'message' => 'An error occurred while processing the request.'
+            }));
+        }
+    }
+
+    // POST /services/apexrest/civictax/v1/*
+    @HttpPost
+    global static void handlePost() {
+        RestRequest req = RestContext.request;
+        RestResponse res = RestContext.response;
+        res.addHeader('Content-Type', 'application/json');
+
+        String uri = req.requestURI;
+        String endpoint = uri.substringAfter('/civictax/v1/');
+        String bodyStr = req.requestBody != null ? req.requestBody.toString() : '';
+
+        try {
+            if (endpoint.startsWith('properties')) {
+                Map<String, Object> payload = (Map<String, Object>) JSON.deserializeUntyped(bodyStr);
+                Property__c prop = PropertyService.registerProperty(
+                    (String) payload.get('propertyNumber'),
+                    (String) payload.get('address'),
+                    (String) payload.get('category'),
+                    Decimal.valueOf(String.valueOf(payload.get('builtUpArea'))),
+                    (String) payload.get('zone'),
+                    payload.get('latitude') != null ? Decimal.valueOf(String.valueOf(payload.get('latitude'))) : null,
+                    payload.get('longitude') != null ? Decimal.valueOf(String.valueOf(payload.get('longitude'))) : null,
+                    (String) payload.get('documentReference'),
+                    payload.get('constructionYear') != null ? Integer.valueOf(payload.get('constructionYear')) : null
+                );
+                List<Property__c> sanitized = (List<Property__c>) CivicTaxSecurityService.sanitizeRecords(AccessType.READABLE, new List<Property__c>{prop});
+                res.statusCode = 201;
+                res.responseBody = Blob.valueOf(JSON.serialize(sanitized[0]));
+            } else if (endpoint.startsWith('payments')) {
+                Map<String, Object> payload = (Map<String, Object>) JSON.deserializeUntyped(bodyStr);
+                String assessmentId = (String) payload.get('assessmentId');
+
+                // BOLA / IDOR Protection: Validate access to assessment before recording payment
+                if (String.isNotBlank(assessmentId)) {
+                    CivicTaxSecurityService.requireCanAccessAssessment((Id) assessmentId);
+                }
+
+                Tax_Payment__c pmt = PaymentService.recordPayment(
+                    assessmentId,
+                    Decimal.valueOf(String.valueOf(payload.get('amountPaid'))),
+                    (String) payload.get('paymentMethod'),
+                    (String) payload.get('transactionId')
+                );
+                List<Tax_Payment__c> sanitized = (List<Tax_Payment__c>) CivicTaxSecurityService.sanitizeRecords(AccessType.READABLE, new List<Tax_Payment__c>{pmt});
+                res.statusCode = 201;
+                res.responseBody = Blob.valueOf(JSON.serialize(sanitized[0]));
+            } else {
+                res.statusCode = 404;
+                res.responseBody = Blob.valueOf('{"error":"ENDPOINT_NOT_FOUND"}');
+            }
+        } catch (CivicTaxSecurityService.SecurityException sex) {
+            res.statusCode = 403;
+            res.responseBody = Blob.valueOf(JSON.serialize(new Map<String, String>{
+                'error' => 'FORBIDDEN',
+                'message' => sex.getMessage()
+            }));
+        } catch (Exception ex) {
+            res.statusCode = 400;
+            res.responseBody = Blob.valueOf(JSON.serialize(new Map<String, String>{
+                'error' => 'BAD_REQUEST',
+                'message' => ex.getMessage()
+            }));
+        }
+    }
+
+    // PATCH /services/apexrest/civictax/v1/*
+    @HttpPatch
+    global static void handlePatch() {
+        RestRequest req = RestContext.request;
+        RestResponse res = RestContext.response;
+        res.addHeader('Content-Type', 'application/json');
+
+        String uri = req.requestURI;
+        String endpoint = uri.substringAfter('/civictax/v1/');
+        String bodyStr = req.requestBody != null ? req.requestBody.toString() : '';
+
+        try {
+            if (endpoint.startsWith('properties')) {
+                // Operation-level authorization: Property verification restricted to Officer or Admin
+                if (!CivicTaxSecurityService.canVerifyProperty()) {
+                    res.statusCode = 403;
+                    res.responseBody = Blob.valueOf(JSON.serialize(new Map<String, String>{
+                        'error' => 'FORBIDDEN',
+                        'message' => 'Property verification is restricted to Municipal Officers and Administrators.'
+                    }));
+                    return;
+                }
+
+                Map<String, Object> payload = (Map<String, Object>) JSON.deserializeUntyped(bodyStr);
+                String propertyId = (String) payload.get('propertyId');
+                String status = (String) payload.get('status');
+                String notes = (String) payload.get('notes');
+                Property__c prop = PropertyService.updateVerificationStatus(propertyId, status, notes);
+                List<Property__c> sanitized = (List<Property__c>) CivicTaxSecurityService.sanitizeRecords(AccessType.READABLE, new List<Property__c>{prop});
+                res.statusCode = 200;
+                res.responseBody = Blob.valueOf(JSON.serialize(sanitized[0]));
+            } else {
+                res.statusCode = 404;
+                res.responseBody = Blob.valueOf('{"error":"ENDPOINT_NOT_FOUND"}');
+            }
+        } catch (CivicTaxSecurityService.SecurityException sex) {
+            res.statusCode = 403;
+            res.responseBody = Blob.valueOf(JSON.serialize(new Map<String, String>{
+                'error' => 'FORBIDDEN',
+                'message' => sex.getMessage()
+            }));
+        } catch (Exception ex) {
+            res.statusCode = 400;
+            res.responseBody = Blob.valueOf(JSON.serialize(new Map<String, String>{
+                'error' => 'BAD_REQUEST',
+                'message' => ex.getMessage()
+            }));
+        }
+    }
+}
+
+
+========== .\src\services\SalesforcePropertyService.ts ==========
+import {
+  Property,
+  PropertyCategory,
+  PropertyFilterOptions,
+  PropertyVerificationStatus,
+} from '../types';
+import { IPropertyService } from './interfaces';
+import { BACKEND_BASE } from './salesforceApiClient';
+
+interface BackendProperty {
+  id: string;
+  propertyNumber?: string;
+  ownerId?: string;
+  ownerName?: string;
+  address?: string;
+  category?: string;
+  builtUpArea?: number;
+  zone?: string;
+  verificationStatus?: string;
+  documentReference?: string;
+  latitude?: number;
+  longitude?: number;
+  constructionYear?: number;
+  registrationDate?: string;
+}
+
+export class SalesforcePropertyService implements IPropertyService {
+  private async request<T>(path: string, options: RequestInit = {}): Promise<T> {
+    const response = await fetch(`${BACKEND_BASE}${path}`, {
+      ...options,
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        ...options.headers,
+      },
+    });
+
+    const result = await response.json().catch(() => ({}));
+
+    if (!response.ok || result.success === false) {
+      throw new Error(
+        result.error || result.message || `CivicTax API error (${response.status})`
+      );
+    }
+
+    return result as T;
+  }
+
+  private mapProperty(record: BackendProperty): Property {
+    const category = ['RESIDENTIAL', 'COMMERCIAL', 'INDUSTRIAL'].includes(
+      record.category || ''
+    )
+      ? (record.category as PropertyCategory)
+      : 'RESIDENTIAL';
+
+    const validStatuses: PropertyVerificationStatus[] = [
+      'DRAFT',
+      'SUBMITTED',
+      'PENDING',
+      'VERIFIED',
+      'REJECTED',
+      'RESUBMISSION_REQUIRED',
+    ];
+
+    const status = validStatuses.includes(
+      record.verificationStatus as PropertyVerificationStatus
+    )
+      ? (record.verificationStatus as PropertyVerificationStatus)
+      : 'PENDING';
+
+    const zone = record.zone || '';
+
+    return {
+      id: record.id,
+      propertyNumber: record.propertyNumber || '',
+      ownerId: record.ownerId || '',
+      ownerName: record.ownerName || 'Not available',
+      ownerEmail: '',
+      ownerPhone: '',
+      address: record.address || '',
+      category,
+      zoneId: zone,
+      zoneName: zone,
+      builtUpArea: Number(record.builtUpArea || 0),
+      constructionYear: Number(record.constructionYear || 0),
+      documentReference: record.documentReference || '',
+      contactDetails: '',
+      description: '',
+      verificationStatus: status,
+      registrationDate: record.registrationDate || '',
+      updatedAt: record.registrationDate || '',
+      latitude: record.latitude,
+      longitude: record.longitude,
+      revisions: [],
+    };
+  }
+
+  public async getProperties(filter?: PropertyFilterOptions): Promise<Property[]> {
+    const result = await this.request<{ data: BackendProperty[] }>(
+      '/api/properties'
+    );
+
+    let properties = (result.data || []).map((record) =>
+      this.mapProperty(record)
+    );
+
+    if (filter?.search) {
+      const query = filter.search.toLowerCase().trim();
+      properties = properties.filter((property) =>
+        [
+          property.propertyNumber,
+          property.ownerName,
+          property.address,
+          property.documentReference,
+        ].some((value) => value.toLowerCase().includes(query))
+      );
+    }
+
+    if (filter?.category && filter.category !== 'ALL') {
+      properties = properties.filter(
+        (property) => property.category === filter.category
+      );
+    }
+
+    if (filter?.zoneId && filter.zoneId !== 'ALL') {
+      properties = properties.filter(
+        (property) => property.zoneId === filter.zoneId
+      );
+    }
+
+    if (filter?.verificationStatus && filter.verificationStatus !== 'ALL') {
+      properties = properties.filter(
+        (property) =>
+          property.verificationStatus === filter.verificationStatus
+      );
+    }
+
+    if (filter?.ownerId) {
+      properties = properties.filter(
+        (property) => property.ownerId === filter.ownerId
+      );
+    }
+
+    return properties;
+  }
+
+  public async getPropertyById(id: string): Promise<Property | null> {
+    try {
+      const result = await this.request<{ data: BackendProperty }>(
+        `/api/properties/${encodeURIComponent(id)}`
+      );
+      return result.data ? this.mapProperty(result.data) : null;
+    } catch (error: any) {
+      if (error.message?.includes('(404)')) return null;
+      throw error;
+    }
+  }
+
+  public async getPropertyByNumber(propertyNumber: string): Promise<Property | null> {
+    const properties = await this.getProperties();
+    return (
+      properties.find(
+        (property) =>
+          property.propertyNumber.toUpperCase() === propertyNumber.toUpperCase()
+      ) || null
+    );
+  }
+
+ 
+  public async createProperty(
+    data: Omit<
+      Property,
+      | 'id'
+      | 'propertyNumber'
+      | 'registrationDate'
+      | 'updatedAt'
+      | 'verificationStatus'
+    >
+  ): Promise<Property> {
+    const result = await this.request<{ data: BackendProperty }>(
+      '/api/properties',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          ownerId: data.ownerId,
+          ownerName: data.ownerName,
+          address: data.address,
+          category: data.category,
+          zone: data.zoneName || data.zoneId,
+          builtUpArea: data.builtUpArea,
+          documentReference: data.documentReference,
+          constructionYear: data.constructionYear,
+        }),
+      }
+    );
+
+    if (!result.data) {
+      throw new Error(
+        'Salesforce did not return the registered property.'
+      );
+    }
+
+    return this.mapProperty(result.data);
+  }
+
+  public async updateProperty(
+    id: string,
+    data: Partial<Property>
+  ): Promise<Property> {
+    const result = await this.request<{ data: BackendProperty }>(
+      `/api/properties/${encodeURIComponent(id)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      }
+    );
+
+    return this.mapProperty(result.data);
+  }
+
+  public async verifyProperty(
+    id: string,
+    status: PropertyVerificationStatus,
+    _officerId: string,
+    _officerName: string,
+    comments?: string
+  ): Promise<Property> {
+    const result = await this.request<{ data: BackendProperty }>(
+      `/api/properties/${encodeURIComponent(id)}/verify`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ status, comments }),
+      }
+    );
+
+    return this.mapProperty(result.data);
+  }
+
+  public async deleteProperty(_id: string): Promise<boolean> {
+    throw new Error(
+      'Salesforce property deletion is disabled. No Salesforce records have been deleted.'
+    );
+  }
+}
+
+
+
+========== .\src\services\serviceFactory.ts ==========
+import {
+  IUserService,
+  IPropertyService,
+  ITaxRateService,
+  IAssessmentService,
+  IPaymentService,
+  IGrievanceService,
+  IReassessmentService,
+  INotificationService,
+  IDashboardService,
+  IZoneService,
+} from './interfaces';
+
+import { LocalUserService } from './local/LocalUserService';
+import { LocalPropertyService } from './local/LocalPropertyService';
+import { SalesforcePropertyService } from './SalesforcePropertyService';
+import { LocalTaxRateService } from './local/LocalTaxRateService';
+import { LocalAssessmentService } from './local/LocalAssessmentService';
+import { LocalPaymentService } from './local/LocalPaymentService';
+import { LocalGrievanceService } from './local/LocalGrievanceService';
+import { LocalReassessmentService } from './local/LocalReassessmentService';
+import { LocalNotificationService } from './local/LocalNotificationService';
+import { LocalDashboardService } from './local/LocalDashboardService';
+import { LocalZoneService } from './local/LocalZoneService';
+
+class ServiceFactory {
+  private static instance: ServiceFactory;
+
+  public readonly userService: IUserService;
+  public readonly propertyService: IPropertyService;
+  public readonly taxRateService: ITaxRateService;
+  public readonly assessmentService: IAssessmentService;
+  public readonly paymentService: IPaymentService;
+  public readonly grievanceService: IGrievanceService;
+  public readonly reassessmentService: IReassessmentService;
+  public readonly notificationService: INotificationService;
+  public readonly dashboardService: IDashboardService;
+  public readonly zoneService: IZoneService;
+
+  private constructor() {
+    const useSalesforce = import.meta.env.VITE_USE_SALESFORCE === 'true';
+
+    this.userService = new LocalUserService();
+    this.propertyService = useSalesforce
+      ? new SalesforcePropertyService()
+      : new LocalPropertyService();
+
+    this.taxRateService = new LocalTaxRateService();
+    this.assessmentService = new LocalAssessmentService();
+    this.paymentService = new LocalPaymentService();
+    this.grievanceService = new LocalGrievanceService();
+    this.reassessmentService = new LocalReassessmentService();
+    this.notificationService = new LocalNotificationService();
+    this.dashboardService = new LocalDashboardService();
+    this.zoneService = new LocalZoneService();
+
+    console.info(
+      `CivicTax Property Data Source: ${useSalesforce ? 'Salesforce' : 'Local Demo'}`
+    );
+  }
+
+  public static getInstance(): ServiceFactory {
+    if (!ServiceFactory.instance) {
+      ServiceFactory.instance = new ServiceFactory();
+    }
+    return ServiceFactory.instance;
+  }
+}
+
+export const services = ServiceFactory.getInstance();
