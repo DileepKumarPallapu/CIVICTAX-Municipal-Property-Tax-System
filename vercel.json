@@ -1,5 +1,4 @@
-@'
-{
+﻿{
   "framework": "vite",
   "cleanUrls": true,
   "rewrites": [
@@ -28,4 +27,3 @@
     }
   ]
 }
-'@ | Set-Content -Encoding utf8 vercel.json
