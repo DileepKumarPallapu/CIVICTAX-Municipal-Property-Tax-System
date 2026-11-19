@@ -1,9 +1,11 @@
+
 import express from 'express';
 import session from 'express-session';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import { RedisStore } from 'connect-redis';
-import { Redis } from 'ioredis';
+import { createClient } from 'redis';
+
 import { config } from './config/index.js';
 import { authRouter } from './routes/authRoutes.js';
 import { salesforceApiRouter } from './routes/salesforceRoutes.js';
@@ -11,10 +13,11 @@ import { municipalApiRouter } from './modules/municipalRoutes.js';
 
 export const app = express();
 
-// Trust proxy header when running behind Vercel / reverse proxy
 app.set('trust proxy', 1);
 
-// Configure CORS for local development and production Vercel frontend domains
+const isProduction =
+  config.nodeEnv === 'production' || Boolean(process.env.VERCEL);
+
 const allowedOrigins = [
   config.frontendUrl,
   'http://localhost:5173',
@@ -24,53 +27,66 @@ const allowedOrigins = [
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Allow requests with no origin (like mobile apps, curl, postman, or server-to-server)
       if (!origin) return callback(null, true);
 
-      // Match configured frontendUrl or localhost
-      const isAllowed = allowedOrigins.some(
-        (allowed) => origin === allowed || origin.startsWith(allowed)
-      );
+      const isAllowed = allowedOrigins.includes(origin);
 
-      // Match Vercel preview deployment URLs if frontendUrl is hosted on Vercel
       const isVercelPreview =
         origin.endsWith('.vercel.app') &&
-        (config.frontendUrl.includes('vercel.app') || config.nodeEnv === 'production');
+        (config.frontendUrl.includes('vercel.app') ||
+          config.nodeEnv === 'production');
 
       if (isAllowed || isVercelPreview) {
         return callback(null, true);
       }
-      return callback(null, false);
+
+      return callback(new Error('Origin not allowed by CivicTax CORS'));
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'x-civictax-csrf'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-Requested-With',
+      'x-civictax-csrf',
+    ],
   })
 );
 
 app.use(express.json());
 app.use(cookieParser());
 
-// Express Session Setup with Durable Redis Store in Production / Ephemeral fallback in Local
-// Express Session Setup
-const isProduction = config.nodeEnv === 'production' || Boolean(process.env.VERCEL);
-
+// Redis session configuration
 let sessionStore: session.Store | undefined;
+let redisReady: Promise<void> | undefined;
+let redisConnectionError: unknown;
 
 if (config.redisUrl) {
-  const redisClient = new Redis(config.redisUrl, {
-    maxRetriesPerRequest: 3,
-    enableReadyCheck: false,
-    lazyConnect: true,
+  const redisClient = createClient({
+    url: config.redisUrl,
+    socket: {
+      reconnectStrategy: (retries) =>
+        Math.min(retries * 500, 5000),
+    },
   });
 
-  redisClient.on('error', (err) => {
-    console.error('Redis session error:', err.message);
+  redisClient.on('error', (error) => {
+    console.error('Redis session client error:', error.message);
   });
 
-  redisClient.connect().catch((err) => {
-    console.error('Redis connection failed:', err.message);
+  redisClient.on('ready', () => {
+    console.log('CivicTax Redis session client ready');
   });
+
+  redisReady = redisClient
+    .connect()
+    .then(() => {
+      console.log('CivicTax Redis session connection established');
+    })
+    .catch((error: unknown) => {
+      redisConnectionError = error;
+      console.error('Redis initial connection failed:', error);
+    });
 
   sessionStore = new RedisStore({
     client: redisClient,
@@ -81,8 +97,26 @@ if (config.redisUrl) {
   throw new Error(
     'REDIS_URL is required in production. Configure Redis before starting CivicTax.'
   );
+} else {
+  console.warn(
+    'REDIS_URL is not configured. Using the Express in-memory session store for local development.'
+  );
 }
 
+// Ensure Redis is ready before processing session requests.
+if (redisReady) {
+  app.use(async (_req, _res, next) => {
+    await redisReady;
+
+    if (redisConnectionError) {
+      return next(redisConnectionError);
+    }
+
+    next();
+  });
+}
+
+// Express session middleware
 app.use(
   session({
     name: 'civictax.sid',
@@ -95,17 +129,18 @@ app.use(
       secure: isProduction,
       sameSite: isProduction ? 'none' : 'lax',
       maxAge: 8 * 60 * 60 * 1000,
+      path: '/',
     },
   })
 );
 
-// Mount Routers
+// Application routers
 app.use(authRouter);
 app.use(salesforceApiRouter);
 app.use(municipalApiRouter);
 
-// Service Root and Health Endpoints
-app.get('/', (req, res) => {
+// Root endpoint
+app.get('/', (_req, res) => {
   res.json({
     status: 'HEALTHY',
     service: 'CivicTax Municipal Backend Gateway',
@@ -116,7 +151,8 @@ app.get('/', (req, res) => {
   });
 });
 
-app.get('/health', (req, res) => {
+// Health endpoint
+app.get('/health', (_req, res) => {
   res.json({
     status: 'HEALTHY',
     service: 'CivicTax Salesforce Gateway',
@@ -125,12 +161,26 @@ app.get('/health', (req, res) => {
 });
 
 // Global error handler
-app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  console.error('Unhandled server error:', err);
-  res.status(err.status || 500).json({
-    error: 'INTERNAL_SERVER_ERROR',
-    message: isProduction ? 'An unexpected error occurred' : err.message,
-  });
-});
+app.use(
+  (
+    err: any,
+    _req: express.Request,
+    res: express.Response,
+    next: express.NextFunction
+  ) => {
+    console.error('Unhandled server error:', err);
+
+    if (res.headersSent) {
+      return next(err);
+    }
+
+    res.status(err.status || 500).json({
+      error: 'INTERNAL_SERVER_ERROR',
+      message: isProduction
+        ? 'An unexpected error occurred'
+        : err.message,
+    });
+  }
+);
 
 export default app;
