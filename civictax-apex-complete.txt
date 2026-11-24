@@ -1,0 +1,2536 @@
+﻿========== APEX CLASSES ==========
+
+========== CivicTaxRestResource.cls ==========
+// CivicTaxRestResource.cls
+// CivicTax 8.0, 9.0 & 10.0 Enterprise Apex REST Resource Endpoint
+@RestResource(urlMapping='/civictax/v1/*')
+global with sharing class CivicTaxRestResource {
+
+    // GET /services/apexrest/civictax/v1/*
+    @HttpGet
+    global static void handleGet() {
+        RestRequest req = RestContext.request;
+        RestResponse res = RestContext.response;
+        res.addHeader('Content-Type', 'application/json');
+
+        String uri = req.requestURI;
+        String endpoint = uri.substringAfter('/civictax/v1/');
+
+        try {
+            if (endpoint.startsWith('health') || endpoint.startsWith('status')) {
+                Map<String, Object> health = new Map<String, Object>{
+                    'status' => 'OK',
+                    'service' => 'CivicTax Apex REST Gateway',
+                    'version' => 'v10.0',
+                    'timestamp' => System.now()
+                };
+                res.statusCode = 200;
+                res.responseBody = Blob.valueOf(JSON.serialize(health));
+            } else if (endpoint.startsWith('properties')) {
+                String sub = endpoint.substringAfter('properties');
+                if (String.isNotBlank(sub) && sub.startsWith('/')) {
+                    String propId = sub.substringAfter('/');
+                    Property__c prop;
+                    try {
+                        prop = PropertyService.getProperty(propId);
+                    } catch (CivicTaxSecurityService.SecurityException se) {
+                        res.statusCode = 403;
+                        res.responseBody = Blob.valueOf(JSON.serialize(new Map<String, String>{
+                            'error' => 'FORBIDDEN',
+                            'message' => 'Access denied: Property record is private or belongs to another citizen.'
+                        }));
+                        return;
+                    } catch (Exception pe) {
+                        if (!CivicTaxSecurityService.isOfficerOrAdmin()) {
+                            res.statusCode = 403;
+                            res.responseBody = Blob.valueOf(JSON.serialize(new Map<String, String>{
+                                'error' => 'FORBIDDEN',
+                                'message' => 'Access denied: Property record is private or belongs to another citizen.'
+                            }));
+                            return;
+                        } else {
+                            res.statusCode = 404;
+                            res.responseBody = Blob.valueOf(JSON.serialize(new Map<String, String>{
+                                'error' => 'NOT_FOUND',
+                                'message' => pe.getMessage()
+                            }));
+                            return;
+                        }
+                    }
+
+                    // Ownership validation for citizen access
+                    Boolean isPrivileged = CivicTaxSecurityService.isOfficerOrAdmin();
+                    Boolean isOwner = (prop.OwnerId == UserInfo.getUserId() || 
+                                      (prop.Property_Owner__r != null && prop.Property_Owner__r.Email == UserInfo.getUserEmail()));
+                    if (!isPrivileged && !isOwner) {
+                        res.statusCode = 403;
+                        res.responseBody = Blob.valueOf(JSON.serialize(new Map<String, String>{
+                            'error' => 'FORBIDDEN',
+                            'message' => 'Access denied: Property record belongs to another citizen.'
+                        }));
+                        return;
+                    }
+
+                    List<Property__c> sanitized = (List<Property__c>) CivicTaxSecurityService.sanitizeRecords(AccessType.READABLE, new List<Property__c>{prop});
+                    res.statusCode = 200;
+                    res.responseBody = Blob.valueOf(JSON.serialize(sanitized[0]));
+                } else {
+                    // List properties with automatic user isolation and field sanitization
+                    List<Property__c> props = PropertyService.listProperties(null, null, null);
+                    res.statusCode = 200;
+                    res.responseBody = Blob.valueOf(JSON.serialize(props));
+                }
+            } else if (endpoint.startsWith('assessments')) {
+                if (CivicTaxSecurityService.isOfficerOrAdmin()) {
+                    List<Tax_Assessment__c> asms = [
+                        SELECT Id,
+       Name,
+       Assessment_Number__c,
+       Assessment_Year__c,
+       Property__c,
+       Base_Value__c,
+       Base_Tax__c,
+       Applied_Rate_Per_Sq_Ft__c,
+       Penalty__c,
+       Discount__c,
+       Total_Tax__c,
+       Total_Amount__c,
+       Amount_Paid__c,
+       Outstanding_Amount__c,
+       Due_Date__c,
+       Assessment_Status__c
+FROM Tax_Assessment__c 
+                        ORDER BY Due_Date__c ASC 
+                        LIMIT 100
+                    ];
+                    List<Tax_Assessment__c> sanitized = (List<Tax_Assessment__c>) CivicTaxSecurityService.sanitizeRecords(AccessType.READABLE, asms);
+                    res.statusCode = 200;
+                    res.responseBody = Blob.valueOf(JSON.serialize(sanitized));
+                } else {
+                    Id currentUserId = UserInfo.getUserId();
+                    String currentUserEmail = UserInfo.getUserEmail();
+                    List<Tax_Assessment__c> citizenAsms = [
+                        SELECT Id,
+       Name,
+       Assessment_Number__c,
+       Assessment_Year__c,
+       Property__c,
+       Base_Value__c,
+       Base_Tax__c,
+       Applied_Rate_Per_Sq_Ft__c,
+       Penalty__c,
+       Discount__c,
+       Total_Tax__c,
+       Total_Amount__c,
+       Amount_Paid__c,
+       Outstanding_Amount__c,
+       Due_Date__c,
+       Assessment_Status__c
+FROM Tax_Assessment__c
+                        WHERE Property__r.OwnerId = :currentUserId OR Property__r.Property_Owner__r.Email = :currentUserEmail 
+                        ORDER BY Due_Date__c ASC 
+                        LIMIT 100
+                    ];
+                    List<Tax_Assessment__c> sanitized = (List<Tax_Assessment__c>) CivicTaxSecurityService.sanitizeRecords(AccessType.READABLE, citizenAsms);
+                    res.statusCode = 200;
+                    res.responseBody = Blob.valueOf(JSON.serialize(sanitized));
+                }
+            } else if (endpoint.startsWith('dashboard')) {
+                if (!CivicTaxSecurityService.canViewExecutiveDashboard()) {
+                    res.statusCode = 403;
+                    res.responseBody = Blob.valueOf(JSON.serialize(new Map<String, String>{
+                        'error' => 'FORBIDDEN',
+                        'message' => 'Dashboard revenue analytics restricted to Municipal Officers and Administrators.'
+                    }));
+                    return;
+                }
+
+                Map<String, Object> metrics = new Map<String, Object>();
+                metrics.put('totalProperties', [SELECT count() FROM Property__c]);
+                metrics.put('verifiedProperties', [SELECT count() FROM Property__c WHERE Verification_Status__c = 'VERIFIED']);
+                metrics.put('pendingProperties', [SELECT count() FROM Property__c WHERE Verification_Status__c = 'PENDING']);
+                
+                AggregateResult[] revAgg = [SELECT SUM(Total_Amount__c) totalDemand, SUM(Amount_Paid__c) totalCollected FROM Tax_Assessment__c];
+                Decimal demand = 0;
+                Decimal collected = 0;
+                if (!revAgg.isEmpty()) {
+                    demand = (Decimal) revAgg[0].get('totalDemand');
+                    collected = (Decimal) revAgg[0].get('totalCollected');
+                }
+                metrics.put('totalAssessedTax', demand != null ? demand : 0);
+                metrics.put('totalRevenueCollected', collected != null ? collected : 0);
+                res.statusCode = 200;
+                res.responseBody = Blob.valueOf(JSON.serialize(metrics));
+            } else {
+                res.statusCode = 404;
+                res.responseBody = Blob.valueOf('{"error":"ENDPOINT_NOT_FOUND"}');
+            }
+        } catch (CivicTaxSecurityService.SecurityException sex) {
+            res.statusCode = 403;
+            res.responseBody = Blob.valueOf(JSON.serialize(new Map<String, String>{
+                'error' => 'FORBIDDEN',
+                'message' => sex.getMessage()
+            }));
+        } catch (Exception ex) {
+            res.statusCode = 500;
+            res.responseBody = Blob.valueOf(JSON.serialize(new Map<String, String>{
+                'error' => 'INTERNAL_SERVER_ERROR',
+                'message' => 'An error occurred while processing the request.'
+            }));
+        }
+    }
+
+    // POST /services/apexrest/civictax/v1/*
+    @HttpPost
+    global static void handlePost() {
+        RestRequest req = RestContext.request;
+        RestResponse res = RestContext.response;
+        res.addHeader('Content-Type', 'application/json');
+
+        String uri = req.requestURI;
+        String endpoint = uri.substringAfter('/civictax/v1/');
+        String bodyStr = req.requestBody != null ? req.requestBody.toString() : '';
+
+        try {
+            if (endpoint.startsWith('properties')) {
+                Map<String, Object> payload = (Map<String, Object>) JSON.deserializeUntyped(bodyStr);
+                Property__c prop = PropertyService.registerProperty(
+                    (String) payload.get('propertyNumber'),
+                    (String) payload.get('address'),
+                    (String) payload.get('category'),
+                    Decimal.valueOf(String.valueOf(payload.get('builtUpArea'))),
+                    (String) payload.get('zone'),
+                    payload.get('latitude') != null ? Decimal.valueOf(String.valueOf(payload.get('latitude'))) : null,
+                    payload.get('longitude') != null ? Decimal.valueOf(String.valueOf(payload.get('longitude'))) : null,
+                    (String) payload.get('documentReference'),
+                    payload.get('constructionYear') != null ? Integer.valueOf(payload.get('constructionYear')) : null
+                );
+                List<Property__c> sanitized = (List<Property__c>) CivicTaxSecurityService.sanitizeRecords(AccessType.READABLE, new List<Property__c>{prop});
+                res.statusCode = 201;
+                res.responseBody = Blob.valueOf(JSON.serialize(sanitized[0]));
+            } else if (endpoint.startsWith('payments')) {
+                Map<String, Object> payload = (Map<String, Object>) JSON.deserializeUntyped(bodyStr);
+                String assessmentId = (String) payload.get('assessmentId');
+
+                // BOLA / IDOR Protection: Validate access to assessment before recording payment
+                if (String.isNotBlank(assessmentId)) {
+                    CivicTaxSecurityService.requireCanAccessAssessment((Id) assessmentId);
+                }
+
+                Tax_Payment__c pmt = PaymentService.recordPayment(
+                    assessmentId,
+                    Decimal.valueOf(String.valueOf(payload.get('amountPaid'))),
+                    (String) payload.get('paymentMethod'),
+                    (String) payload.get('transactionId')
+                );
+                List<Tax_Payment__c> sanitized = (List<Tax_Payment__c>) CivicTaxSecurityService.sanitizeRecords(AccessType.READABLE, new List<Tax_Payment__c>{pmt});
+                res.statusCode = 201;
+                res.responseBody = Blob.valueOf(JSON.serialize(sanitized[0]));
+            } else {
+                res.statusCode = 404;
+                res.responseBody = Blob.valueOf('{"error":"ENDPOINT_NOT_FOUND"}');
+            }
+        } catch (CivicTaxSecurityService.SecurityException sex) {
+            res.statusCode = 403;
+            res.responseBody = Blob.valueOf(JSON.serialize(new Map<String, String>{
+                'error' => 'FORBIDDEN',
+                'message' => sex.getMessage()
+            }));
+        } catch (Exception ex) {
+            res.statusCode = 400;
+            res.responseBody = Blob.valueOf(JSON.serialize(new Map<String, String>{
+                'error' => 'BAD_REQUEST',
+                'message' => ex.getMessage()
+            }));
+        }
+    }
+
+    // PATCH /services/apexrest/civictax/v1/*
+    @HttpPatch
+    global static void handlePatch() {
+        RestRequest req = RestContext.request;
+        RestResponse res = RestContext.response;
+        res.addHeader('Content-Type', 'application/json');
+
+        String uri = req.requestURI;
+        String endpoint = uri.substringAfter('/civictax/v1/');
+        String bodyStr = req.requestBody != null ? req.requestBody.toString() : '';
+
+        try {
+            if (endpoint.startsWith('properties')) {
+                // Operation-level authorization: Property verification restricted to Officer or Admin
+                if (!CivicTaxSecurityService.canVerifyProperty()) {
+                    res.statusCode = 403;
+                    res.responseBody = Blob.valueOf(JSON.serialize(new Map<String, String>{
+                        'error' => 'FORBIDDEN',
+                        'message' => 'Property verification is restricted to Municipal Officers and Administrators.'
+                    }));
+                    return;
+                }
+
+                Map<String, Object> payload = (Map<String, Object>) JSON.deserializeUntyped(bodyStr);
+                String propertyId = (String) payload.get('propertyId');
+                String status = (String) payload.get('status');
+                String notes = (String) payload.get('notes');
+                Property__c prop = PropertyService.updateVerificationStatus(propertyId, status, notes);
+                List<Property__c> sanitized = (List<Property__c>) CivicTaxSecurityService.sanitizeRecords(AccessType.READABLE, new List<Property__c>{prop});
+                res.statusCode = 200;
+                res.responseBody = Blob.valueOf(JSON.serialize(sanitized[0]));
+            } else {
+                res.statusCode = 404;
+                res.responseBody = Blob.valueOf('{"error":"ENDPOINT_NOT_FOUND"}');
+            }
+        } catch (CivicTaxSecurityService.SecurityException sex) {
+            res.statusCode = 403;
+            res.responseBody = Blob.valueOf(JSON.serialize(new Map<String, String>{
+                'error' => 'FORBIDDEN',
+                'message' => sex.getMessage()
+            }));
+        } catch (Exception ex) {
+            res.statusCode = 400;
+            res.responseBody = Blob.valueOf(JSON.serialize(new Map<String, String>{
+                'error' => 'BAD_REQUEST',
+                'message' => ex.getMessage()
+            }));
+        }
+    }
+}
+
+========== PropertyService.cls ==========
+// PropertyService.cls
+// CivicTax 8.0 & 10.0 Enterprise Apex Service for Property Management
+public with sharing class PropertyService {
+    public class PropertyException extends Exception {}
+
+    // Register a new property with full validation and CRUD guards
+    public static Property__c registerProperty(
+        String propertyNumber,
+        String address,
+        String category,
+        Decimal builtUpArea,
+        String zone,
+        Decimal latitude,
+        Decimal longitude,
+        String ownershipDoc,
+        Integer constructionYear
+    ) {
+        if (!CivicTaxSecurityService.canCreateObject('Property__c')) {
+            throw new CivicTaxSecurityService.SecurityException('Access Denied: Insufficient permissions to register Property.');
+        }
+
+        if (String.isBlank(propertyNumber)) {
+            throw new PropertyException('Property Number is required.');
+        }
+        if (builtUpArea == null || builtUpArea <= 0) {
+            throw new PropertyException('Built up area must be greater than zero.');
+        }
+
+        // Duplicate check
+        List<Property__c> existing = [
+            SELECT Id, Property_Number__c 
+            FROM Property__c 
+            WHERE Property_Number__c = :propertyNumber 
+            LIMIT 1
+        ];
+        if (!existing.isEmpty()) {
+            throw new PropertyException('Property with number ' + propertyNumber + ' already exists.');
+        }
+
+        Property__c prop = new Property__c(
+            Name = propertyNumber,
+            Property_Number__c = propertyNumber,
+            Property_Address__c = address,
+            Property_Category__c = category,
+            Built_Up_Area__c = builtUpArea,
+            Zone__c = zone,
+            Latitude__c = latitude,
+            Longitude__c = longitude,
+            Ownership_Document__c = ownershipDoc,
+            Construction_Year__c = constructionYear,
+            Verification_Status__c = 'PENDING',
+            Registration_Date__c = System.now()
+        );
+
+        insert prop;
+        return prop;
+    }
+
+    // Retrieve single property by Property Number or Id with strict ownership validation
+    public static Property__c getProperty(String identifier) {
+        if (String.isBlank(identifier)) {
+            throw new PropertyException('Property identifier cannot be blank.');
+        }
+
+        Boolean isSalesforceId = false;
+        try {
+            Id checkId = (Id) identifier;
+            isSalesforceId = true;
+        } catch (Exception ex) {
+            isSalesforceId = false;
+        }
+
+        List<Property__c> props;
+        if (isSalesforceId) {
+            props = [
+                SELECT Id, Name, Property_Number__c, Property_Address__c, Property_Category__c, 
+                       Built_Up_Area__c, Zone__c, Verification_Status__c, Ownership_Document__c, 
+                       Registration_Date__c, Latitude__c, Longitude__c, Construction_Year__c,
+                       OwnerId, Property_Owner__c, Property_Owner__r.Email
+                FROM Property__c 
+                WHERE Id = :identifier OR Property_Number__c = :identifier 
+                LIMIT 1
+            ];
+        } else {
+            props = [
+                SELECT Id, Name, Property_Number__c, Property_Address__c, Property_Category__c, 
+                       Built_Up_Area__c, Zone__c, Verification_Status__c, Ownership_Document__c, 
+                       Registration_Date__c, Latitude__c, Longitude__c, Construction_Year__c,
+                       OwnerId, Property_Owner__c, Property_Owner__r.Email
+                FROM Property__c 
+                WHERE Property_Number__c = :identifier 
+                LIMIT 1
+            ];
+        }
+
+        if (props.isEmpty()) {
+            throw new PropertyException('Property record not found for: ' + identifier);
+        }
+
+        // BOLA / IDOR Protection: Validate that running user can access this property
+        CivicTaxSecurityService.requireCanAccessProperty(props[0].Id);
+
+        List<Property__c> sanitized = (List<Property__c>) CivicTaxSecurityService.sanitizeRecords(AccessType.READABLE, props);
+        return sanitized[0];
+    }
+
+    // List properties with optional filters and user isolation
+    public static List<Property__c> listProperties(String category, String zone, String status) {
+        String query = 'SELECT Id, Name, Property_Number__c, Property_Address__c, Property_Category__c, ' +
+               'Built_Up_Area__c, Zone__c, Municipal_Zone__c, Verification_Status__c, ' +
+               'Registration_Date__c, Latitude__c, Longitude__c, Property_Owner__c, ' +
+               'Property_Owner__r.Name, Property_Owner__r.Email ' +
+               'FROM Property__c ';
+        List<String> conditions = new List<String>();
+
+        // Enforce user isolation if not officer/admin
+        if (!CivicTaxSecurityService.isOfficerOrAdmin()) {
+            Id currentUserId = UserInfo.getUserId();
+            String currentUserEmail = UserInfo.getUserEmail();
+            conditions.add('(OwnerId = :currentUserId OR Property_Owner__r.Email = :currentUserEmail)');
+        }
+
+        if (String.isNotBlank(category)) {
+            conditions.add('Property_Category__c = :category');
+        }
+        if (String.isNotBlank(zone)) {
+            conditions.add('Zone__c = :zone');
+        }
+        if (String.isNotBlank(status)) {
+            conditions.add('Verification_Status__c = :status');
+        }
+
+        if (!conditions.isEmpty()) {
+            query += 'WHERE ' + String.join(conditions, ' AND ') + ' ';
+        }
+
+        query += 'ORDER BY CreatedDate DESC LIMIT 100';
+
+        List<Property__c> props = Database.query(query);
+        return (List<Property__c>) CivicTaxSecurityService.sanitizeRecords(AccessType.READABLE, props);
+    }
+
+    // Update Verification Status (Officer / Admin Only)
+    public static Property__c updateVerificationStatus(String propertyId, String newStatus, String officerNotes) {
+        CivicTaxSecurityService.requireCanVerifyProperty();
+
+        if (!CivicTaxSecurityService.canUpdateObject('Property__c')) {
+            throw new CivicTaxSecurityService.SecurityException('Access Denied: Insufficient permissions to update Property verification.');
+        }
+
+        return new SystemElevatedContext().executeUpdateVerification(propertyId, newStatus, officerNotes);
+    }
+
+    /**
+     * @description Dedicated elevated execution context for authorized municipal officer property verification
+     */
+    private without sharing class SystemElevatedContext {
+        public Property__c executeUpdateVerification(String propertyId, String newStatus, String officerNotes) {
+            Property__c prop;
+            Boolean isSalesforceId = false;
+            try {
+                Id checkId = (Id) propertyId;
+                isSalesforceId = true;
+            } catch (Exception ex) {
+                isSalesforceId = false;
+            }
+
+            List<Property__c> props;
+            if (isSalesforceId) {
+                props = [
+                    SELECT Id, Verification_Status__c 
+                    FROM Property__c 
+                    WHERE Id = :propertyId OR Property_Number__c = :propertyId 
+                    LIMIT 1
+                ];
+            } else {
+                props = [
+                    SELECT Id, Verification_Status__c 
+                    FROM Property__c 
+                    WHERE Property_Number__c = :propertyId 
+                    LIMIT 1
+                ];
+            }
+
+            if (props.isEmpty()) {
+                throw new PropertyException('Property record not found for: ' + propertyId);
+            }
+
+            prop = props[0];
+            prop.Verification_Status__c = newStatus;
+            update prop;
+            return prop;
+        }
+    }
+}
+
+========== PaymentService.cls ==========
+// PaymentService.cls
+// CivicTax 8.0 & 10.0 Authoritative Apex Payment Processing Service
+public with sharing class PaymentService {
+    public class PaymentException extends Exception {}
+
+    // Process a tax payment, update assessment balances and statuses atomically
+    public static Tax_Payment__c recordPayment(
+        String assessmentId,
+        Decimal amount,
+        String paymentMethod,
+        String transactionId
+    ) {
+        if (!CivicTaxSecurityService.canCreateObject('Tax_Payment__c')) {
+            throw new CivicTaxSecurityService.SecurityException('Access Denied: Insufficient permissions to create Payment records.');
+        }
+
+        if (amount == null || amount <= 0) {
+            throw new PaymentException('Payment amount must be greater than zero.');
+        }
+        if (String.isBlank(transactionId)) {
+            throw new PaymentException('Transaction reference ID is mandatory.');
+        }
+
+        // BOLA / IDOR Protection: Validate caller has access to the target assessment
+        if (String.isNotBlank(assessmentId)) {
+            CivicTaxSecurityService.requireCanAccessAssessment((Id) assessmentId);
+        }
+
+        // Duplicate payment transaction protection
+        List<Tax_Payment__c> duplicateCheck = [
+            SELECT Id, Transaction_ID__c 
+            FROM Tax_Payment__c 
+            WHERE Transaction_ID__c = :transactionId 
+            LIMIT 1
+        ];
+        if (!duplicateCheck.isEmpty()) {
+            throw new PaymentException('Duplicate transaction reference detected: ' + transactionId);
+        }
+
+        // Lock assessment for balance calculation
+        List<Tax_Assessment__c> assessments = [
+            SELECT Id, Name, Total_Amount__c, Amount_Paid__c, Outstanding_Amount__c, Assessment_Status__c 
+            FROM Tax_Assessment__c 
+            WHERE Id = :assessmentId 
+            FOR UPDATE
+        ];
+        if (assessments.isEmpty()) {
+            throw new PaymentException('Target assessment record not found.');
+        }
+
+        Tax_Assessment__c asm = assessments[0];
+        Decimal currentPaid = asm.Amount_Paid__c == null ? 0 : asm.Amount_Paid__c;
+        Decimal outstanding = asm.Outstanding_Amount__c == null ? asm.Total_Amount__c : asm.Outstanding_Amount__c;
+
+        if (amount > outstanding) {
+            throw new PaymentException('Payment amount (â‚¹' + amount + ') exceeds remaining balance (â‚¹' + outstanding + ').');
+        }
+
+        // Create Payment record
+        Tax_Payment__c payment = new Tax_Payment__c(
+            Name = 'PAY-' + System.currentTimeMillis(),
+            Assessment__c = asm.Id,
+            Amount_Paid__c = amount,
+            Payment_Date__c = System.now(),
+            Payment_Method__c = paymentMethod,
+            Transaction_ID__c = transactionId,
+            Payment_Status__c = 'SUCCESS'
+        );
+        insert payment;
+
+        // Recalculate Assessment
+        Decimal newPaid = (currentPaid + amount).setScale(2, System.RoundingMode.HALF_UP);
+        Decimal newOutstanding = (asm.Total_Amount__c - newPaid).setScale(2, System.RoundingMode.HALF_UP);
+
+        asm.Amount_Paid__c = newPaid;
+        asm.Outstanding_Amount__c = newOutstanding;
+        if (newOutstanding <= 0) {
+            asm.Assessment_Status__c = 'PAID';
+        } else {
+            asm.Assessment_Status__c = 'PARTIALLY_PAID';
+        }
+
+        update asm;
+        return payment;
+    }
+}
+
+========== CivicTaxPaymentService.cls ==========
+/**
+ * @description Enterprise Service for Tax Payment Processing, Allocation, and Ledger Reconciliation
+ * @group CivicTax 6.0 & 10.0
+ */
+public with sharing class CivicTaxPaymentService {
+
+    public class PaymentException extends Exception {}
+
+    /**
+     * @description Processes and records an incoming taxpayer settlement with concurrency and authorization protection
+     */
+    public static Tax_Payment__c processPayment(Id assessmentId, Decimal amount, String paymentMethod, String transactionId) {
+        if (!CivicTaxSecurityService.canCreateObject('Tax_Payment__c')) {
+            throw new CivicTaxSecurityService.SecurityException('Access Denied: Insufficient permissions to create Payment records.');
+        }
+
+        if (assessmentId == null) {
+            throw new PaymentException('Assessment ID is required for payment processing');
+        }
+        if (amount == null || amount <= 0) {
+            throw new PaymentException('Payment amount must be strictly greater than zero');
+        }
+        if (String.isBlank(transactionId)) {
+            throw new PaymentException('Gateway Transaction ID is mandatory');
+        }
+
+        // BOLA / IDOR Protection: Validate caller has access to the target assessment
+        CivicTaxSecurityService.requireCanAccessAssessment(assessmentId);
+
+        // Duplicate Check
+        List<Tax_Payment__c> duplicatePayments = [
+            SELECT Id, Transaction_ID__c, Payment_Reference__c 
+            FROM Tax_Payment__c 
+            WHERE Transaction_ID__c = :transactionId 
+            LIMIT 1
+        ];
+        if (!duplicatePayments.isEmpty()) {
+            throw new PaymentException('Duplicate payment detected: Transaction ' + transactionId + ' has already been processed.');
+        }
+
+        // Retrieve Assessment with Lock for financial concurrency safety
+        List<Tax_Assessment__c> assessments = [
+            SELECT Id, Total_Tax__c, Total_Amount__c, Amount_Paid__c, Outstanding_Amount__c, Assessment_Status__c 
+            FROM Tax_Assessment__c 
+            WHERE Id = :assessmentId 
+            FOR UPDATE
+        ];
+
+        if (assessments.isEmpty()) {
+            throw new PaymentException('Target Assessment record not found');
+        }
+
+        Tax_Assessment__c asm = assessments[0];
+        Decimal currentOutstanding = asm.Outstanding_Amount__c != null 
+            ? asm.Outstanding_Amount__c 
+            : (asm.Total_Amount__c != null ? asm.Total_Amount__c : 0.0);
+
+        if (amount > currentOutstanding) {
+            throw new PaymentException('Payment amount cannot exceed total outstanding dues of ' + currentOutstanding);
+        }
+
+        // Create Payment Record
+        Tax_Payment__c pmt = new Tax_Payment__c();
+        pmt.Assessment__c = asm.Id;
+        pmt.Amount__c = amount;
+        pmt.Amount_Paid__c = amount;
+        pmt.Payment_Date__c = System.now();
+        pmt.Payment_Method__c = paymentMethod;
+        pmt.Transaction_ID__c = transactionId;
+        pmt.Transaction_Status__c = 'Success';
+        pmt.Payment_Status__c = 'SUCCESS';
+        pmt.Payment_Reference__c = 'RCT-' + System.currentTimeMillis();
+
+        insert pmt;
+
+        // Recalculate Assessment Balances
+        Decimal currentPaid = asm.Amount_Paid__c != null ? asm.Amount_Paid__c : 0.0;
+        Decimal newPaid = currentPaid + amount;
+        Decimal newOutstanding = currentOutstanding - amount;
+
+        asm.Amount_Paid__c = newPaid;
+        asm.Outstanding_Amount__c = newOutstanding;
+        asm.Assessment_Status__c = newOutstanding <= 0 ? 'PAID' : 'PARTIALLY_PAID';
+
+        update asm;
+
+        return pmt;
+    }
+
+    /**
+     * @description Lists all payment receipts for an assessment with access control
+     */
+    public static List<Tax_Payment__c> getPaymentsForAssessment(Id assessmentId) {
+        if (assessmentId == null) {
+            return new List<Tax_Payment__c>();
+        }
+
+        // Enforce Assessment access
+        CivicTaxSecurityService.requireCanAccessAssessment(assessmentId);
+
+        List<Tax_Payment__c> pmts = [
+            SELECT Id, Name, Payment_Reference__c, Assessment__c, Amount__c, Amount_Paid__c, 
+                   Payment_Date__c, Payment_Method__c, Transaction_Status__c, Transaction_ID__c 
+            FROM Tax_Payment__c 
+            WHERE Assessment__c = :assessmentId 
+            ORDER BY Payment_Date__c DESC
+        ];
+
+        return (List<Tax_Payment__c>) CivicTaxSecurityService.sanitizeRecords(AccessType.READABLE, pmts);
+    }
+}
+
+========== CivicTaxAssessmentService.cls ==========
+/**
+ * @description Enterprise Service for Municipal Tax Assessment Calculations & Lifecycle Management
+ * @group CivicTax 6.0
+ */
+public with sharing class CivicTaxAssessmentService {
+
+    public class AssessmentException extends Exception {}
+
+    private static final Map<String, Decimal> BASE_RATES = new Map<String, Decimal>{
+        'RESIDENTIAL' => 10.0,
+        'COMMERCIAL' => 18.0,
+        'INDUSTRIAL' => 25.0,
+        'AGRICULTURAL' => 5.0,
+        'Residential' => 10.0,
+        'Commercial' => 18.0,
+        'Industrial' => 25.0,
+        'Agricultural' => 5.0
+    };
+
+    /**
+     * @description Calculates and creates a statutory tax assessment for a verified property
+     */
+    public static Tax_Assessment__c calculateAndCreateAssessment(Id propertyId, String assessmentYear) {
+        if (propertyId == null) {
+            throw new AssessmentException('Property ID is mandatory for assessment');
+        }
+
+        CivicTaxSecurityService.requireCanManageAssessments();
+
+        List<Property__c> properties = [
+            SELECT Id, Property_Number__c, Property_Category__c, Built_Up_Area__c, Verification_Status__c 
+            FROM Property__c 
+            WHERE Id = :propertyId 
+            LIMIT 1
+        ];
+
+        if (properties.isEmpty()) {
+            throw new AssessmentException('Property not found');
+        }
+
+        Property__c prop = properties[0];
+        if (prop.Verification_Status__c != 'VERIFIED' && prop.Verification_Status__c != 'Verified') {
+            throw new AssessmentException('Tax assessment requires property to be strictly Verified.');
+        }
+
+        Decimal rate = BASE_RATES.containsKey(prop.Property_Category__c) 
+            ? BASE_RATES.get(prop.Property_Category__c) 
+            : 10.0;
+        
+        Decimal builtArea = prop.Built_Up_Area__c != null ? prop.Built_Up_Area__c : 0.0;
+        Decimal baseTax = builtArea * rate;
+        Decimal discount = baseTax * 0.05; // 5% prompt payment discount
+        Decimal penalty = 0.0;
+        Decimal totalTax = baseTax - discount;
+
+        Tax_Assessment__c asm = new Tax_Assessment__c();
+        asm.Property__c = prop.Id;
+        asm.Assessment_Number__c = 'ASM-' + prop.Property_Number__c + '-' + assessmentYear.replace('-', '');
+        asm.Assessment_Year__c = assessmentYear;
+        asm.Base_Value__c = baseTax;
+        asm.Base_Tax__c = baseTax;
+        asm.Discount__c = discount;
+        asm.Penalty__c = penalty;
+        asm.Total_Tax__c = totalTax;
+        asm.Total_Amount__c = totalTax;
+        asm.Outstanding_Amount__c = totalTax;
+        asm.Amount_Paid__c = 0.0;
+        asm.Due_Date__c = Date.today().addDays(60);
+        asm.Assessment_Status__c = 'APPROVED';
+
+        insert asm;
+        return asm;
+    }
+
+    /**
+     * @description Fetches all assessments for a property with access control and sanitization
+     */
+    public static List<Tax_Assessment__c> getAssessmentsForProperty(Id propertyId) {
+        if (propertyId == null) {
+            return new List<Tax_Assessment__c>();
+        }
+
+        // BOLA / IDOR Protection: Validate caller has access to the target property
+        CivicTaxSecurityService.requireCanAccessProperty(propertyId);
+
+        List<Tax_Assessment__c> asms = [
+            SELECT Id, Name, Assessment_Number__c, Property__c, Assessment_Year__c, 
+                   Base_Tax__c, Base_Value__c, Penalty__c, Discount__c, Total_Tax__c, Total_Amount__c, 
+                   Amount_Paid__c, Outstanding_Amount__c, Due_Date__c, Assessment_Status__c 
+            FROM Tax_Assessment__c 
+            WHERE Property__c = :propertyId 
+            ORDER BY CreatedDate DESC
+        ];
+
+        return (List<Tax_Assessment__c>) CivicTaxSecurityService.sanitizeRecords(AccessType.READABLE, asms);
+    }
+}
+
+========== CivicTaxGrievanceService.cls ==========
+/**
+ * @description Enterprise Service for Citizen Grievance Intake, Routing, and SLA Resolution
+ * @group CivicTax 6.0 & 10.0
+ */
+public with sharing class CivicTaxGrievanceService {
+
+    public class GrievanceException extends Exception {}
+
+    /**
+     * @description Creates a new grievance docket with ownership validation and CRUD enforcement
+     */
+    public static Grievance__c submitGrievance(Id propertyId, String subject, String description, String priority) {
+        if (!CivicTaxSecurityService.canCreateObject('Grievance__c')) {
+            throw new CivicTaxSecurityService.SecurityException('Access Denied: Insufficient permissions to create Grievance records.');
+        }
+
+        if (String.isBlank(subject) || String.isBlank(description)) {
+            throw new GrievanceException('Subject and description are mandatory for grievance filing.');
+        }
+
+        // BOLA / IDOR Protection: Citizens can only file grievances against properties they own or have access to
+        if (propertyId != null) {
+            CivicTaxSecurityService.requireCanAccessProperty(propertyId);
+        }
+
+        Grievance__c grv = new Grievance__c();
+        grv.Property__c = propertyId;
+        grv.Subject__c = subject;
+        grv.Description__c = description;
+        grv.Priority__c = String.isNotBlank(priority) ? priority.toUpperCase() : 'MEDIUM';
+        grv.Status__c = 'OPEN';
+
+        insert grv;
+        return grv;
+    }
+
+    /**
+     * @description Resolves an open grievance with required officer resolution comments
+     */
+    public static Grievance__c resolveGrievance(Id grievanceId, String resolutionComments) {
+        if (grievanceId == null) {
+            throw new GrievanceException('Grievance ID cannot be null');
+        }
+        if (String.isBlank(resolutionComments)) {
+            throw new GrievanceException('Mandatory resolution comments must be provided.');
+        }
+
+        // Enforce Grievance Officer or Administrator authorization
+        CivicTaxSecurityService.requireCanResolveGrievance();
+
+        if (!CivicTaxSecurityService.canUpdateObject('Grievance__c')) {
+            throw new CivicTaxSecurityService.SecurityException('Access Denied: Insufficient permissions to update Grievance records.');
+        }
+
+        return new SystemElevatedContext().executeResolveGrievance(grievanceId, resolutionComments);
+    }
+
+    /**
+     * @description Dedicated elevated execution context for authorized municipal officer resolution
+     */
+    private without sharing class SystemElevatedContext {
+        public Grievance__c executeResolveGrievance(Id grievanceId, String resolutionComments) {
+            List<Grievance__c> grievances = [
+                SELECT Id, Status__c, Resolution_Comments__c 
+                FROM Grievance__c 
+                WHERE Id = :grievanceId 
+                LIMIT 1
+            ];
+
+            if (grievances.isEmpty()) {
+                throw new GrievanceException('Grievance not found');
+            }
+
+            Grievance__c grv = grievances[0];
+            grv.Status__c = 'RESOLVED';
+            grv.Resolution_Comments__c = resolutionComments;
+
+            update grv;
+            return grv;
+        }
+    }
+}
+
+========== CivicTaxReassessmentService.cls ==========
+/**
+ * @description Enterprise Service for Property Valuation Reassessment, Multi-Step Approvals & Delta Recomputation
+ * @group CivicTax 6.0 & 10.0
+ */
+public with sharing class CivicTaxReassessmentService {
+
+    public class ReassessmentException extends Exception {}
+
+    /**
+     * @description Submits a reassessment request for an existing property with ownership and CRUD guards
+     */
+    public static Reassessment_Request__c submitRequest(Id propertyId, Id originalAssessmentId, String requestedChange, String reason) {
+        if (!CivicTaxSecurityService.canCreateObject('Reassessment_Request__c')) {
+            throw new CivicTaxSecurityService.SecurityException('Access Denied: Insufficient permissions to submit Reassessment requests.');
+        }
+
+        if (propertyId == null) {
+            throw new ReassessmentException('Target Property ID is mandatory');
+        }
+        if (String.isBlank(requestedChange)) {
+            throw new ReassessmentException('Requested dimensional or category changes must be stated');
+        }
+
+        // BOLA / IDOR Protection: Citizen can only file reassessment for properties they have access to
+        CivicTaxSecurityService.requireCanAccessProperty(propertyId);
+
+        Reassessment_Request__c req = new Reassessment_Request__c();
+        req.Property__c = propertyId;
+        req.Original_Assessment__c = originalAssessmentId;
+        req.Requested_Change__c = requestedChange;
+        req.Supporting_Reason__c = reason;
+        req.Approval_Status__c = 'Submitted';
+        req.Request_Number__c = 'RR-' + String.valueOf(System.currentTimeMillis()).right(6);
+
+        insert req;
+        return req;
+    }
+
+    /**
+     * @description Approves a reassessment request and initiates tax recalculation
+     */
+    public static Reassessment_Request__c approveReassessment(Id requestId, String comments) {
+        if (requestId == null) {
+            throw new ReassessmentException('Request ID cannot be null');
+        }
+
+        // Enforce Reassessment Officer or Administrator authorization
+        CivicTaxSecurityService.requireCanApproveReassessment();
+
+        if (!CivicTaxSecurityService.canUpdateObject('Reassessment_Request__c')) {
+            throw new CivicTaxSecurityService.SecurityException('Access Denied: Insufficient permissions to approve Reassessment requests.');
+        }
+
+        return new SystemElevatedContext().executeApproveReassessment(requestId, comments);
+    }
+
+    /**
+     * @description Dedicated elevated execution context for authorized municipal officer approval
+     */
+    private without sharing class SystemElevatedContext {
+        public Reassessment_Request__c executeApproveReassessment(Id requestId, String comments) {
+            List<Reassessment_Request__c> requests = [
+                SELECT Id, Property__c, Original_Assessment__c, Approval_Status__c, Decision_Comments__c 
+                FROM Reassessment_Request__c 
+                WHERE Id = :requestId 
+                LIMIT 1
+            ];
+
+            if (requests.isEmpty()) {
+                throw new ReassessmentException('Reassessment Request not found');
+            }
+
+            Reassessment_Request__c req = requests[0];
+            req.Approval_Status__c = 'Approved';
+            req.Decision_Comments__c = comments;
+
+            update req;
+            return req;
+        }
+    }
+}
+
+========== CivicTaxSecurityService.cls ==========
+
+/**
+ * CivicTax Security and Authorization Service
+ *
+ * Citizen identity is resolved through:
+ * CivicTax_User__c.CivicTax_ID__c
+ * CivicTax_User__c.Salesforce_Contact_ID__c
+ *
+ * IMPORTANT:
+ * The backend must set the authenticated CivicTax ID for every
+ * Apex REST transaction using setRequestIdentity().
+ */
+public with sharing class CivicTaxSecurityService {
+
+    public class SecurityException extends Exception {}
+
+    // Transaction-scoped identity supplied by the authenticated backend.
+    private static String requestCivicTaxId;
+
+    /**
+     * Set the authenticated CivicTax ID.
+     * Call this at the beginning of every Apex REST request.
+     * Never take this value directly from an untrusted browser request.
+     */
+    public static void setRequestIdentity(String civicTaxId) {
+        if (String.isBlank(civicTaxId)) {
+            throw new SecurityException(
+                'Authenticated CivicTax identity is required.'
+            );
+        }
+
+        requestCivicTaxId = civicTaxId.trim();
+    }
+
+    public static String getRequestIdentity() {
+        return requestCivicTaxId;
+    }
+
+    /**
+     * Resolve the CivicTax user record.
+     */
+    public static CivicTax_User__c getCurrentCivicTaxUser() {
+
+        if (String.isBlank(requestCivicTaxId)) {
+            throw new SecurityException(
+                'CivicTax identity has not been initialized.'
+            );
+        }
+
+        List<CivicTax_User__c> users = [
+            SELECT Id,
+                   CivicTax_ID__c,
+                   Salesforce_Contact_ID__c,
+                   Full_Name__c,
+                   Email__c,
+                   Role__c,
+                   Account_Status__c
+            FROM CivicTax_User__c
+            WHERE CivicTax_ID__c = :requestCivicTaxId
+            LIMIT 2
+        ];
+
+        if (users.isEmpty()) {
+            throw new SecurityException(
+                'No CivicTax user mapping exists for this account.'
+            );
+        }
+
+        if (users.size() > 1) {
+            throw new SecurityException(
+                'Duplicate CivicTax user mappings detected.'
+            );
+        }
+
+        CivicTax_User__c currentUser = users[0];
+
+        if (currentUser.Account_Status__c != 'ACTIVE') {
+            throw new SecurityException(
+                'Your CivicTax account is not active.'
+            );
+        }
+
+        return currentUser;
+    }
+
+    /**
+     * Resolve the Salesforce Contact belonging to the CivicTax user.
+     */
+    public static Id getCurrentCitizenContactId() {
+
+        CivicTax_User__c currentUser = getCurrentCivicTaxUser();
+
+        String contactIdText =
+            currentUser.Salesforce_Contact_ID__c;
+
+        if (String.isBlank(contactIdText)) {
+            throw new SecurityException(
+                'Your CivicTax account is not linked to a Salesforce Contact.'
+            );
+        }
+
+        Id contactId;
+
+        try {
+            contactId = Id.valueOf(contactIdText.trim());
+        } catch (Exception ex) {
+            throw new SecurityException(
+                'The Salesforce Contact mapping is invalid.'
+            );
+        }
+
+        if (contactId.getSObjectType() != Contact.SObjectType) {
+            throw new SecurityException(
+                'The mapped record is not a Salesforce Contact.'
+            );
+        }
+
+        List<Contact> contacts = [
+            SELECT Id
+            FROM Contact
+            WHERE Id = :contactId
+            LIMIT 1
+        ];
+
+        if (contacts.isEmpty()) {
+            throw new SecurityException(
+                'The mapped Salesforce Contact does not exist.'
+            );
+        }
+
+        return contactId;
+    }
+
+    // ---------------------------------------------------------
+    // APPLICATION ROLE AUTHORIZATION
+    // ---------------------------------------------------------
+
+    public static String getCurrentRole() {
+        return getCurrentCivicTaxUser().Role__c;
+    }
+
+    public static Boolean isCitizen() {
+        return getCurrentRole() == 'CITIZEN';
+    }
+
+    public static Boolean isAdmin() {
+        return getCurrentRole() == 'ADMIN';
+    }
+
+    public static Boolean isOfficerOrAdmin() {
+        String role = getCurrentRole();
+
+        return role == 'OFFICER' || role == 'ADMIN';
+    }
+
+    public static Boolean isGeneralOfficerOrAdmin() {
+        return isOfficerOrAdmin();
+    }
+
+    public static Boolean canVerifyProperty() {
+        return isOfficerOrAdmin();
+    }
+
+    public static Boolean canResolveGrievance() {
+        return isOfficerOrAdmin();
+    }
+
+    public static Boolean canApproveReassessment() {
+        return isOfficerOrAdmin();
+    }
+
+    public static Boolean canManageAssessments() {
+        return isOfficerOrAdmin();
+    }
+
+    public static Boolean canViewExecutiveDashboard() {
+        return isOfficerOrAdmin();
+    }
+
+    public static void requireAdmin() {
+        if (!isAdmin()) {
+            throw new SecurityException(
+                'Access denied. Administrator authorization required.'
+            );
+        }
+    }
+
+    public static void requireOfficerOrAdmin() {
+        if (!isOfficerOrAdmin()) {
+            throw new SecurityException(
+                'Access denied. Officer or administrator authorization required.'
+            );
+        }
+    }
+
+    public static void requireCanVerifyProperty() {
+        if (!canVerifyProperty()) {
+            throw new SecurityException(
+                'Property verification is restricted to officers and administrators.'
+            );
+        }
+    }
+
+    public static void requireCanResolveGrievance() {
+        if (!canResolveGrievance()) {
+            throw new SecurityException(
+                'Grievance resolution is restricted to officers and administrators.'
+            );
+        }
+    }
+
+    public static void requireCanApproveReassessment() {
+        if (!canApproveReassessment()) {
+            throw new SecurityException(
+                'Reassessment approval is restricted to officers and administrators.'
+            );
+        }
+    }
+
+    public static void requireCanManageAssessments() {
+        if (!canManageAssessments()) {
+            throw new SecurityException(
+                'Assessment management is restricted to officers and administrators.'
+            );
+        }
+    }
+
+    public static void requireCanViewExecutiveDashboard() {
+        if (!canViewExecutiveDashboard()) {
+            throw new SecurityException(
+                'Executive dashboard access is restricted to officers and administrators.'
+            );
+        }
+    }
+
+    // ---------------------------------------------------------
+    // PROPERTY OWNERSHIP
+    // ---------------------------------------------------------
+
+    public static Boolean canAccessProperty(Id propertyId) {
+
+        if (propertyId == null) {
+            return false;
+        }
+
+        if (isOfficerOrAdmin()) {
+            return true;
+        }
+
+        Id citizenContactId = getCurrentCitizenContactId();
+
+        List<Property__c> properties = [
+            SELECT Id, Owner__c, Property_Owner__c
+            FROM Property__c
+            WHERE Id = :propertyId
+            LIMIT 1
+        ];
+
+        if (properties.isEmpty()) {
+            return false;
+        }
+
+        Property__c propertyRecord = properties[0];
+
+        return (
+            propertyRecord.Property_Owner__c == citizenContactId ||
+            propertyRecord.Owner__c == citizenContactId
+        );
+    }
+
+    public static void requireCanAccessProperty(Id propertyId) {
+
+        if (!canAccessProperty(propertyId)) {
+            throw new SecurityException(
+                'Access denied. This property does not belong to your CivicTax account.'
+            );
+        }
+    }
+
+    // ---------------------------------------------------------
+    // ASSESSMENT OWNERSHIP
+    // ---------------------------------------------------------
+
+    public static Boolean canAccessAssessment(Id assessmentId) {
+
+        if (assessmentId == null) {
+            return false;
+        }
+
+        if (isOfficerOrAdmin()) {
+            return true;
+        }
+
+        Id citizenContactId = getCurrentCitizenContactId();
+
+        List<Tax_Assessment__c> assessments = [
+            SELECT Id,
+                   Property__c,
+                   Property__r.Owner__c,
+                   Property__r.Property_Owner__c
+            FROM Tax_Assessment__c
+            WHERE Id = :assessmentId
+            LIMIT 1
+        ];
+
+        if (assessments.isEmpty()) {
+            return false;
+        }
+
+        Tax_Assessment__c assessment = assessments[0];
+
+        if (assessment.Property__c == null) {
+            return false;
+        }
+
+        return (
+            assessment.Property__r.Property_Owner__c == citizenContactId ||
+            assessment.Property__r.Owner__c == citizenContactId
+        );
+    }
+
+    public static void requireCanAccessAssessment(Id assessmentId) {
+
+        if (!canAccessAssessment(assessmentId)) {
+            throw new SecurityException(
+                'Access denied. This assessment does not belong to your CivicTax account.'
+            );
+        }
+    }
+
+    // ---------------------------------------------------------
+    // OBJECT PERMISSIONS AND FIELD SANITIZATION
+    // ---------------------------------------------------------
+
+    public static Boolean canReadObject(String sObjectName) {
+
+        Schema.SObjectType targetType =
+            Schema.getGlobalDescribe().get(sObjectName);
+
+        return targetType != null &&
+            targetType.getDescribe().isAccessible();
+    }
+
+    public static Boolean canCreateObject(String sObjectName) {
+
+        Schema.SObjectType targetType =
+            Schema.getGlobalDescribe().get(sObjectName);
+
+        return targetType != null &&
+            targetType.getDescribe().isCreateable();
+    }
+
+    public static Boolean canUpdateObject(String sObjectName) {
+
+        Schema.SObjectType targetType =
+            Schema.getGlobalDescribe().get(sObjectName);
+
+        return targetType != null &&
+            targetType.getDescribe().isUpdateable();
+    }
+
+    public static List<SObject> sanitizeRecords(
+        AccessType accessMode,
+        List<SObject> records
+    ) {
+
+        if (records == null || records.isEmpty()) {
+            return records;
+        }
+
+        SObjectAccessDecision decision =
+            Security.stripInaccessible(accessMode, records);
+
+        return decision.getRecords();
+    }
+}
+
+========== SALESFORCE OBJECT FIELD DEFINITIONS ==========
+
+--- CivicTax_User__c ---
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Account_Status__c</fullName>
+    <externalId>false</externalId>
+    <label>Account Status</label>
+    <required>false</required>
+    <trackHistory>false</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Picklist</type>
+    <valueSet>
+        <restricted>true</restricted>
+        <valueSetDefinition>
+            <sorted>false</sorted>
+            <value>
+                <fullName>ACTIVE</fullName>
+                <default>false</default>
+                <label>ACTIVE</label>
+            </value>
+            <value>
+                <fullName>INACTIVE</fullName>
+                <default>false</default>
+                <label>INACTIVE</label>
+            </value>
+            <value>
+                <fullName>SUSPENDED</fullName>
+                <default>false</default>
+                <label>SUSPENDED</label>
+            </value>
+            <value>
+                <fullName>PENDING</fullName>
+                <default>false</default>
+                <label>PENDING</label>
+            </value>
+        </valueSetDefinition>
+    </valueSet>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>CivicTax_ID__c</fullName>
+    <caseSensitive>false</caseSensitive>
+    <externalId>true</externalId>
+    <label>CivicTax ID</label>
+    <length>80</length>
+    <required>false</required>
+    <trackHistory>false</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Text</type>
+    <unique>true</unique>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Email__c</fullName>
+    <externalId>false</externalId>
+    <label>Email</label>
+    <required>false</required>
+    <trackHistory>false</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Email</type>
+    <unique>false</unique>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Full_Name__c</fullName>
+    <externalId>false</externalId>
+    <label>Full Name</label>
+    <length>120</length>
+    <required>false</required>
+    <trackHistory>false</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Text</type>
+    <unique>false</unique>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Phone__c</fullName>
+    <externalId>false</externalId>
+    <label>Phone</label>
+    <required>false</required>
+    <trackHistory>false</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Phone</type>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Role__c</fullName>
+    <externalId>false</externalId>
+    <label>Role</label>
+    <required>false</required>
+    <trackHistory>false</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Picklist</type>
+    <valueSet>
+        <restricted>true</restricted>
+        <valueSetDefinition>
+            <sorted>false</sorted>
+            <value>
+                <fullName>CITIZEN</fullName>
+                <default>false</default>
+                <label>CITIZEN</label>
+            </value>
+            <value>
+                <fullName>OFFICER</fullName>
+                <default>false</default>
+                <label>OFFICER</label>
+            </value>
+            <value>
+                <fullName>ADMIN</fullName>
+                <default>false</default>
+                <label>ADMIN</label>
+            </value>
+        </valueSetDefinition>
+    </valueSet>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Salesforce_Contact_ID__c</fullName>
+    <externalId>false</externalId>
+    <label>Salesforce Contact ID</label>
+    <length>18</length>
+    <required>false</required>
+    <trackHistory>false</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Text</type>
+    <unique>false</unique>
+</CustomField>
+
+--- Property__c ---
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Built_Up_Area__c</fullName>
+    <description>Total covered built-up area in square feet</description>
+    <externalId>false</externalId>
+    <label>Built Up Area (Sq Ft)</label>
+    <precision>10</precision>
+    <required>true</required>
+    <scale>2</scale>
+    <trackHistory>true</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Number</type>
+    <unique>false</unique>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>CivicTax_ID__c</fullName>
+    <caseSensitive>false</caseSensitive>
+    <externalId>true</externalId>
+    <label>CivicTax ID</label>
+    <length>80</length>
+    <required>false</required>
+    <trackHistory>false</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Text</type>
+    <unique>true</unique>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Construction_Year__c</fullName>
+    <description>Year in which the building was constructed</description>
+    <externalId>false</externalId>
+    <label>Construction Year</label>
+    <precision>4</precision>
+    <required>false</required>
+    <scale>0</scale>
+    <trackHistory>false</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Number</type>
+    <unique>false</unique>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Land_Area__c</fullName>
+    <description>Total land or plot area in square feet</description>
+    <externalId>false</externalId>
+    <label>Land Area (sq ft)</label>
+    <precision>12</precision>
+    <required>false</required>
+    <scale>2</scale>
+    <trackHistory>true</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Number</type>
+    <unique>false</unique>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Latitude__c</fullName>
+    <description>GIS WGS84 Latitude coordinate</description>
+    <externalId>false</externalId>
+    <label>Latitude</label>
+    <precision>16</precision>
+    <required>false</required>
+    <scale>6</scale>
+    <trackHistory>false</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Number</type>
+    <unique>false</unique>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Longitude__c</fullName>
+    <description>GIS WGS84 Longitude coordinate</description>
+    <externalId>false</externalId>
+    <label>Longitude</label>
+    <precision>16</precision>
+    <required>false</required>
+    <scale>6</scale>
+    <trackHistory>false</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Number</type>
+    <unique>false</unique>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Municipal_Zone__c</fullName>
+    <deleteConstraint>SetNull</deleteConstraint>
+    <externalId>false</externalId>
+    <label>Municipal Zone</label>
+    <referenceTo>Municipal_Zone__c</referenceTo>
+    <relationshipLabel>Properties</relationshipLabel>
+    <relationshipName>Properties</relationshipName>
+    <required>false</required>
+    <trackHistory>false</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Lookup</type>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Ownership_Document__c</fullName>
+    <description>Sub-registrar title deed reference number</description>
+    <externalId>false</externalId>
+    <label>Ownership Document Reference</label>
+    <length>100</length>
+    <required>false</required>
+    <trackHistory>false</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Text</type>
+    <unique>false</unique>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Owner__c</fullName>
+    <deleteConstraint>SetNull</deleteConstraint>
+    <description>Citizen Contact owning the property</description>
+    <externalId>false</externalId>
+    <label>Citizen Owner</label>
+    <referenceTo>Contact</referenceTo>
+    <relationshipLabel>Properties Owned</relationshipLabel>
+    <relationshipName>Properties_Owned</relationshipName>
+    <required>false</required>
+    <trackHistory>true</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Lookup</type>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Property_Address__c</fullName>
+    <description>Physical site address of the property</description>
+    <externalId>false</externalId>
+    <label>Property Address</label>
+    <required>true</required>
+    <trackHistory>false</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>TextArea</type>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Property_Category__c</fullName>
+    <description>Municipal zoning property classification</description>
+    <externalId>false</externalId>
+    <label>Property Category</label>
+    <required>false</required>
+    <trackHistory>false</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Picklist</type>
+    <valueSet>
+        <valueSetDefinition>
+            <sorted>false</sorted>
+            <value>
+                <fullName>RESIDENTIAL</fullName>
+                <default>true</default>
+                <label>Residential</label>
+            </value>
+            <value>
+                <fullName>COMMERCIAL</fullName>
+                <default>false</default>
+                <label>Commercial</label>
+            </value>
+            <value>
+                <fullName>INDUSTRIAL</fullName>
+                <default>false</default>
+                <label>Industrial</label>
+            </value>
+            <value>
+                <fullName>AGRICULTURAL</fullName>
+                <default>false</default>
+                <label>Agricultural</label>
+            </value>
+        </valueSetDefinition>
+    </valueSet>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Property_Number__c</fullName>
+    <caseSensitive>false</caseSensitive>
+    <description>Unique municipal property identification number (e.g. CT-PROP-2024-001)</description>
+    <externalId>false</externalId>
+    <label>Property Number</label>
+    <length>30</length>
+    <required>false</required>
+    <trackHistory>true</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Text</type>
+    <unique>true</unique>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Property_Owner__c</fullName>
+    <deleteConstraint>SetNull</deleteConstraint>
+    <description>Citizen owner contact record</description>
+    <externalId>false</externalId>
+    <label>Property Owner</label>
+    <referenceTo>Contact</referenceTo>
+    <relationshipLabel>Properties</relationshipLabel>
+    <relationshipName>Properties</relationshipName>
+    <required>false</required>
+    <trackHistory>true</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Lookup</type>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Registration_Date__c</fullName>
+    <description>Timestamp when citizen submitted the registration</description>
+    <externalId>false</externalId>
+    <label>Registration Date</label>
+    <required>false</required>
+    <trackHistory>false</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>DateTime</type>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Registration_Status__c</fullName>
+    <description>Lifecycle status of property registration</description>
+    <externalId>false</externalId>
+    <label>Registration Status</label>
+    <required>false</required>
+    <trackHistory>true</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Picklist</type>
+    <valueSet>
+        <restricted>true</restricted>
+        <valueSetDefinition>
+            <sorted>false</sorted>
+            <value>
+                <fullName>Draft</fullName>
+                <default>true</default>
+                <label>Draft</label>
+            </value>
+            <value>
+                <fullName>Submitted</fullName>
+                <default>false</default>
+                <label>Submitted</label>
+            </value>
+            <value>
+                <fullName>Under Verification</fullName>
+                <default>false</default>
+                <label>Under Verification</label>
+            </value>
+            <value>
+                <fullName>Verified</fullName>
+                <default>false</default>
+                <label>Verified</label>
+            </value>
+            <value>
+                <fullName>Active</fullName>
+                <default>false</default>
+                <label>Active</label>
+            </value>
+            <value>
+                <fullName>Rejected</fullName>
+                <default>false</default>
+                <label>Rejected</label>
+            </value>
+        </valueSetDefinition>
+    </valueSet>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Verification_Status__c</fullName>
+    <description>Officer inspection and verification status</description>
+    <externalId>false</externalId>
+    <label>Verification Status</label>
+    <required>true</required>
+    <trackHistory>false</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Picklist</type>
+    <valueSet>
+        <restricted>true</restricted>
+        <valueSetDefinition>
+            <sorted>false</sorted>
+            <value>
+                <fullName>PENDING</fullName>
+                <default>true</default>
+                <label>Pending</label>
+            </value>
+            <value>
+                <fullName>VERIFIED</fullName>
+                <default>false</default>
+                <label>Verified</label>
+            </value>
+            <value>
+                <fullName>RESUBMISSION_REQUIRED</fullName>
+                <default>false</default>
+                <label>Resubmission Required</label>
+            </value>
+            <value>
+                <fullName>REJECTED</fullName>
+                <default>false</default>
+                <label>Rejected</label>
+            </value>
+        </valueSetDefinition>
+    </valueSet>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Zone__c</fullName>
+    <description>Municipal administrative zone code</description>
+    <externalId>false</externalId>
+    <label>Municipal Zone</label>
+    <length>50</length>
+    <required>false</required>
+    <trackHistory>false</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Text</type>
+    <unique>false</unique>
+</CustomField>
+
+--- Tax_Assessment__c ---
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Amount_Paid__c</fullName>
+    <defaultValue>0</defaultValue>
+    <description>Cumulative successful payments against this assessment</description>
+    <externalId>false</externalId>
+    <label>Amount Paid</label>
+    <precision>14</precision>
+    <required>false</required>
+    <scale>2</scale>
+    <trackHistory>true</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Currency</type>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Applied_Rate_Per_Sq_Ft__c</fullName>
+    <externalId>false</externalId>
+    <label>Applied Rate Per Sq Ft</label>
+    <precision>10</precision>
+    <required>false</required>
+    <scale>2</scale>
+    <trackHistory>false</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Currency</type>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Assessment_Number__c</fullName>
+    <caseSensitive>false</caseSensitive>
+    <externalId>true</externalId>
+    <label>Assessment Number</label>
+    <length>50</length>
+    <required>false</required>
+    <trackHistory>true</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Text</type>
+    <unique>true</unique>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Assessment_Status__c</fullName>
+    <description>Status of annual municipal tax assessment bill</description>
+    <externalId>false</externalId>
+    <label>Assessment Status</label>
+    <required>true</required>
+    <trackHistory>false</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Picklist</type>
+    <valueSet>
+        <restricted>true</restricted>
+        <valueSetDefinition>
+            <sorted>false</sorted>
+            <value>
+                <fullName>DRAFT</fullName>
+                <default>true</default>
+                <label>Draft</label>
+            </value>
+            <value>
+                <fullName>APPROVED</fullName>
+                <default>false</default>
+                <label>Approved</label>
+            </value>
+            <value>
+                <fullName>PARTIALLY_PAID</fullName>
+                <default>false</default>
+                <label>Partially Paid</label>
+            </value>
+            <value>
+                <fullName>PAID</fullName>
+                <default>false</default>
+                <label>Paid</label>
+            </value>
+            <value>
+                <fullName>OVERDUE</fullName>
+                <default>false</default>
+                <label>Overdue</label>
+            </value>
+        </valueSetDefinition>
+    </valueSet>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Assessment_Year__c</fullName>
+    <description>Assessment financial year (e.g. 2024-2025)</description>
+    <externalId>false</externalId>
+    <label>Assessment Year</label>
+    <length>20</length>
+    <required>true</required>
+    <trackHistory>false</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Text</type>
+    <unique>false</unique>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Base_Tax__c</fullName>
+    <externalId>false</externalId>
+    <label>Base Tax</label>
+    <precision>18</precision>
+    <required>false</required>
+    <scale>2</scale>
+    <trackHistory>true</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Currency</type>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Base_Value__c</fullName>
+    <description>Base calculated property tax (Built-up Area Ã— Rate)</description>
+    <externalId>false</externalId>
+    <label>Base Tax Amount</label>
+    <precision>14</precision>
+    <required>true</required>
+    <scale>2</scale>
+    <trackHistory>true</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Currency</type>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Discount__c</fullName>
+    <externalId>false</externalId>
+    <label>Discount</label>
+    <precision>18</precision>
+    <required>false</required>
+    <scale>2</scale>
+    <trackHistory>true</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Currency</type>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Due_Date__c</fullName>
+    <description>Statutory tax payment due date</description>
+    <externalId>false</externalId>
+    <label>Due Date</label>
+    <required>true</required>
+    <trackHistory>false</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Date</type>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Outstanding_Amount__c</fullName>
+    <description>Remaining unsettled tax balance</description>
+    <externalId>false</externalId>
+    <label>Outstanding Amount</label>
+    <precision>14</precision>
+    <required>false</required>
+    <scale>2</scale>
+    <trackHistory>true</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Currency</type>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Penalty__c</fullName>
+    <externalId>false</externalId>
+    <label>Penalty</label>
+    <precision>18</precision>
+    <required>false</required>
+    <scale>2</scale>
+    <trackHistory>true</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Currency</type>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Property__c</fullName>
+    <deleteConstraint>Restrict</deleteConstraint>
+    <description>Associated municipal property parcel</description>
+    <externalId>false</externalId>
+    <label>Property</label>
+    <referenceTo>Property__c</referenceTo>
+    <relationshipLabel>Tax Assessments</relationshipLabel>
+    <relationshipName>Tax_Assessments</relationshipName>
+    <required>true</required>
+    <trackHistory>true</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Lookup</type>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Tax_Rate__c</fullName>
+    <deleteConstraint>SetNull</deleteConstraint>
+    <externalId>false</externalId>
+    <label>Tax Rate</label>
+    <referenceTo>Tax_Rate__c</referenceTo>
+    <relationshipLabel>Tax Assessments</relationshipLabel>
+    <relationshipName>Tax_Assessments</relationshipName>
+    <required>false</required>
+    <trackHistory>false</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Lookup</type>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Total_Amount__c</fullName>
+    <description>Total tax demanded including penalties minus discounts</description>
+    <externalId>false</externalId>
+    <label>Total Assessment Amount</label>
+    <precision>14</precision>
+    <required>true</required>
+    <scale>2</scale>
+    <trackHistory>true</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Currency</type>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Total_Tax__c</fullName>
+    <externalId>false</externalId>
+    <label>Total Tax</label>
+    <precision>18</precision>
+    <required>false</required>
+    <scale>2</scale>
+    <trackHistory>true</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Currency</type>
+</CustomField>
+
+--- Tax_Payment__c ---
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Amount_Paid__c</fullName>
+    <description>Amount paid in this specific transaction</description>
+    <externalId>false</externalId>
+    <label>Amount Paid</label>
+    <precision>14</precision>
+    <required>true</required>
+    <scale>2</scale>
+    <trackHistory>true</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Currency</type>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Amount__c</fullName>
+    <externalId>false</externalId>
+    <label>Amount</label>
+    <precision>18</precision>
+    <required>false</required>
+    <scale>2</scale>
+    <trackHistory>true</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Currency</type>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Assessment__c</fullName>
+    <deleteConstraint>Restrict</deleteConstraint>
+    <description>Assessment bill against which this payment was made</description>
+    <externalId>false</externalId>
+    <label>Assessment</label>
+    <referenceTo>Tax_Assessment__c</referenceTo>
+    <relationshipLabel>Tax Payments</relationshipLabel>
+    <relationshipName>Tax_Payments</relationshipName>
+    <required>true</required>
+    <trackHistory>true</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Lookup</type>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>CivicTax_ID__c</fullName>
+    <caseSensitive>false</caseSensitive>
+    <externalId>true</externalId>
+    <label>CivicTax ID</label>
+    <length>80</length>
+    <required>false</required>
+    <trackHistory>false</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Text</type>
+    <unique>true</unique>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Gateway_Reference__c</fullName>
+    <externalId>false</externalId>
+    <label>Gateway Reference</label>
+    <length>100</length>
+    <required>false</required>
+    <trackHistory>true</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Text</type>
+    <unique>false</unique>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Payment_Date__c</fullName>
+    <description>Timestamp of transaction settlement</description>
+    <externalId>false</externalId>
+    <label>Payment Date</label>
+    <required>true</required>
+    <trackHistory>false</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>DateTime</type>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Payment_Method__c</fullName>
+    <description>Mode of payment used</description>
+    <externalId>false</externalId>
+    <label>Payment Method</label>
+    <required>true</required>
+    <trackHistory>false</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Picklist</type>
+    <valueSet>
+        <restricted>true</restricted>
+        <valueSetDefinition>
+            <sorted>false</sorted>
+            <value>
+                <fullName>UPI</fullName>
+                <default>true</default>
+                <label>UPI</label>
+            </value>
+            <value>
+                <fullName>NET_BANKING</fullName>
+                <default>false</default>
+                <label>Net Banking</label>
+            </value>
+            <value>
+                <fullName>CARD</fullName>
+                <default>false</default>
+                <label>Credit/Debit Card</label>
+            </value>
+            <value>
+                <fullName>CASH_COUNTER</fullName>
+                <default>false</default>
+                <label>Municipal Cash Counter</label>
+            </value>
+        </valueSetDefinition>
+    </valueSet>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Payment_Reference__c</fullName>
+    <caseSensitive>false</caseSensitive>
+    <externalId>true</externalId>
+    <label>Payment Reference</label>
+    <length>50</length>
+    <required>false</required>
+    <trackHistory>true</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Text</type>
+    <unique>true</unique>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Payment_Status__c</fullName>
+    <description>Status of payment transaction</description>
+    <externalId>false</externalId>
+    <label>Payment Status</label>
+    <required>true</required>
+    <trackHistory>false</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Picklist</type>
+    <valueSet>
+        <restricted>true</restricted>
+        <valueSetDefinition>
+            <sorted>false</sorted>
+            <value>
+                <fullName>SUCCESS</fullName>
+                <default>true</default>
+                <label>Success</label>
+            </value>
+            <value>
+                <fullName>FAILED</fullName>
+                <default>false</default>
+                <label>Failed</label>
+            </value>
+            <value>
+                <fullName>PENDING</fullName>
+                <default>false</default>
+                <label>Pending</label>
+            </value>
+        </valueSetDefinition>
+    </valueSet>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Receipt_Number__c</fullName>
+    <caseSensitive>false</caseSensitive>
+    <externalId>false</externalId>
+    <label>Receipt Number</label>
+    <length>50</length>
+    <required>false</required>
+    <trackHistory>false</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Text</type>
+    <unique>true</unique>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Transaction_ID__c</fullName>
+    <caseSensitive>false</caseSensitive>
+    <description>Gateway or simulated bank reference transaction ID</description>
+    <externalId>true</externalId>
+    <label>Transaction ID</label>
+    <length>100</length>
+    <required>true</required>
+    <trackHistory>true</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Text</type>
+    <unique>true</unique>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Transaction_Status__c</fullName>
+    <externalId>false</externalId>
+    <label>Transaction Status</label>
+    <required>false</required>
+    <trackHistory>true</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Picklist</type>
+    <valueSet>
+        <restricted>true</restricted>
+        <valueSetDefinition>
+            <sorted>false</sorted>
+            <value>
+                <fullName>Initiated</fullName>
+                <default>true</default>
+                <label>Initiated</label>
+            </value>
+            <value>
+                <fullName>Success</fullName>
+                <default>false</default>
+                <label>Success</label>
+            </value>
+            <value>
+                <fullName>Failed</fullName>
+                <default>false</default>
+                <label>Failed</label>
+            </value>
+            <value>
+                <fullName>Refunded</fullName>
+                <default>false</default>
+                <label>Refunded</label>
+            </value>
+        </valueSetDefinition>
+    </valueSet>
+</CustomField>
+
+--- Grievance__c ---
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Citizen__c</fullName>
+    <deleteConstraint>SetNull</deleteConstraint>
+    <externalId>false</externalId>
+    <label>Citizen</label>
+    <referenceTo>CivicTax_User__c</referenceTo>
+    <relationshipLabel>Grievances</relationshipLabel>
+    <relationshipName>Grievances</relationshipName>
+    <required>false</required>
+    <trackHistory>false</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Lookup</type>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>CivicTax_ID__c</fullName>
+    <caseSensitive>false</caseSensitive>
+    <externalId>true</externalId>
+    <label>CivicTax ID</label>
+    <length>80</length>
+    <required>false</required>
+    <trackHistory>false</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Text</type>
+    <unique>true</unique>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Description__c</fullName>
+    <description>Full narrative description of grievance</description>
+    <externalId>false</externalId>
+    <label>Description</label>
+    <length>32768</length>
+    <trackHistory>false</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>LongTextArea</type>
+    <visibleLines>5</visibleLines>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Priority__c</fullName>
+    <description>Urgency level of grievance</description>
+    <externalId>false</externalId>
+    <label>Priority</label>
+    <required>true</required>
+    <trackHistory>false</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Picklist</type>
+    <valueSet>
+        <restricted>true</restricted>
+        <valueSetDefinition>
+            <sorted>false</sorted>
+            <value>
+                <fullName>LOW</fullName>
+                <default>false</default>
+                <label>Low</label>
+            </value>
+            <value>
+                <fullName>MEDIUM</fullName>
+                <default>true</default>
+                <label>Medium</label>
+            </value>
+            <value>
+                <fullName>HIGH</fullName>
+                <default>false</default>
+                <label>High</label>
+            </value>
+            <value>
+                <fullName>CRITICAL</fullName>
+                <default>false</default>
+                <label>Critical</label>
+            </value>
+        </valueSetDefinition>
+    </valueSet>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Property__c</fullName>
+    <deleteConstraint>SetNull</deleteConstraint>
+    <description>Subject property related to grievance</description>
+    <externalId>false</externalId>
+    <label>Property</label>
+    <referenceTo>Property__c</referenceTo>
+    <relationshipLabel>Grievances</relationshipLabel>
+    <relationshipName>Grievances</relationshipName>
+    <required>false</required>
+    <trackHistory>false</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Lookup</type>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Resolution_Comments__c</fullName>
+    <description>Officer findings and resolution remarks</description>
+    <externalId>false</externalId>
+    <label>Resolution Comments</label>
+    <length>32768</length>
+    <trackHistory>false</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>LongTextArea</type>
+    <visibleLines>4</visibleLines>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Resolution_Date__c</fullName>
+    <description>Timestamp when grievance was marked resolved</description>
+    <externalId>false</externalId>
+    <label>Resolution Date</label>
+    <required>false</required>
+    <trackHistory>false</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>DateTime</type>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Status__c</fullName>
+    <description>Workflow state of citizen grievance</description>
+    <externalId>false</externalId>
+    <label>Status</label>
+    <required>true</required>
+    <trackHistory>false</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Picklist</type>
+    <valueSet>
+        <restricted>true</restricted>
+        <valueSetDefinition>
+            <sorted>false</sorted>
+            <value>
+                <fullName>OPEN</fullName>
+                <default>true</default>
+                <label>Open</label>
+            </value>
+            <value>
+                <fullName>IN_PROGRESS</fullName>
+                <default>false</default>
+                <label>In Progress</label>
+            </value>
+            <value>
+                <fullName>RESOLVED</fullName>
+                <default>false</default>
+                <label>Resolved</label>
+            </value>
+            <value>
+                <fullName>CLOSED</fullName>
+                <default>false</default>
+                <label>Closed</label>
+            </value>
+        </valueSetDefinition>
+    </valueSet>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Subject__c</fullName>
+    <description>Short summary of grievance</description>
+    <externalId>false</externalId>
+    <label>Subject</label>
+    <length>255</length>
+    <required>true</required>
+    <trackHistory>false</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Text</type>
+    <unique>false</unique>
+</CustomField>
+
+--- Reassessment_Request__c ---
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Approval_Status__c</fullName>
+    <externalId>false</externalId>
+    <label>Approval Status</label>
+    <required>false</required>
+    <trackHistory>true</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Picklist</type>
+    <valueSet>
+        <restricted>true</restricted>
+        <valueSetDefinition>
+            <sorted>false</sorted>
+            <value>
+                <fullName>Submitted</fullName>
+                <default>true</default>
+                <label>Submitted</label>
+            </value>
+            <value>
+                <fullName>Under Review</fullName>
+                <default>false</default>
+                <label>Under Review</label>
+            </value>
+            <value>
+                <fullName>Recommended</fullName>
+                <default>false</default>
+                <label>Recommended</label>
+            </value>
+            <value>
+                <fullName>Approved</fullName>
+                <default>false</default>
+                <label>Approved</label>
+            </value>
+            <value>
+                <fullName>Rejected</fullName>
+                <default>false</default>
+                <label>Rejected</label>
+            </value>
+        </valueSetDefinition>
+    </valueSet>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Citizen__c</fullName>
+    <deleteConstraint>SetNull</deleteConstraint>
+    <externalId>false</externalId>
+    <label>Citizen</label>
+    <referenceTo>CivicTax_User__c</referenceTo>
+    <relationshipLabel>Reassessment Requests</relationshipLabel>
+    <relationshipName>Reassessment_Requests</relationshipName>
+    <required>false</required>
+    <trackHistory>false</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Lookup</type>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>CivicTax_ID__c</fullName>
+    <caseSensitive>false</caseSensitive>
+    <externalId>true</externalId>
+    <label>CivicTax ID</label>
+    <length>80</length>
+    <required>false</required>
+    <trackHistory>false</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Text</type>
+    <unique>true</unique>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Decision_Comments__c</fullName>
+    <externalId>false</externalId>
+    <label>Decision Comments</label>
+    <length>32768</length>
+    <trackHistory>true</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>LongTextArea</type>
+    <visibleLines>4</visibleLines>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Original_Assessment__c</fullName>
+    <deleteConstraint>SetNull</deleteConstraint>
+    <externalId>false</externalId>
+    <label>Original Assessment</label>
+    <referenceTo>Tax_Assessment__c</referenceTo>
+    <relationshipLabel>Reassessment Requests</relationshipLabel>
+    <relationshipName>Reassessment_Requests</relationshipName>
+    <required>false</required>
+    <trackHistory>true</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Lookup</type>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Property__c</fullName>
+    <deleteConstraint>SetNull</deleteConstraint>
+    <externalId>false</externalId>
+    <label>Property</label>
+    <referenceTo>Property__c</referenceTo>
+    <relationshipLabel>Reassessment Requests</relationshipLabel>
+    <relationshipName>Reassessment_Requests</relationshipName>
+    <required>false</required>
+    <trackHistory>true</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Lookup</type>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Requested_Change__c</fullName>
+    <externalId>false</externalId>
+    <label>Requested Change</label>
+    <length>32768</length>
+    <trackHistory>true</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>LongTextArea</type>
+    <visibleLines>4</visibleLines>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Request_Number__c</fullName>
+    <caseSensitive>false</caseSensitive>
+    <externalId>true</externalId>
+    <label>Request Number</label>
+    <length>50</length>
+    <required>false</required>
+    <trackHistory>true</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Text</type>
+    <unique>true</unique>
+</CustomField>
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Supporting_Reason__c</fullName>
+    <externalId>false</externalId>
+    <label>Supporting Reason</label>
+    <length>255</length>
+    <required>false</required>
+    <trackHistory>true</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Text</type>
+    <unique>false</unique>
+</CustomField>

@@ -13,6 +13,12 @@ type SalesforceIdentity = {
   user_id: string;
 };
 
+type SalesforceHttpMethod =
+  | 'GET'
+  | 'POST'
+  | 'PATCH'
+  | 'DELETE';
+
 export class SalesforceClient {
   // ============================================================
   // 1. EXCHANGE AUTHORIZATION CODE FOR TOKENS
@@ -141,45 +147,96 @@ export class SalesforceClient {
   }
 
   // ============================================================
-  // 4. APEX REST API CALL
+  // 4. BUILD APEX REST URL
   // ============================================================
 
-  public static async callApexRest(
+  private static buildApexUrl(
+    instanceUrl: string,
+    endpointPath: string
+  ): string {
+    const baseUrl = instanceUrl.replace(/\/+$/, '');
+
+    const cleanPath = endpointPath
+      .replace(/^\/+/, '')
+      .replace(/\/+$/, '');
+
+    return (
+      `${baseUrl}/services/apexrest/civictax/v1/${cleanPath}`
+    );
+  }
+
+  // ============================================================
+  // 5. BUILD REQUEST OPTIONS
+  // ============================================================
+
+  private static buildRequestOptions(
     session: SalesforceSessionData,
-    endpointPath: string,
-    method: 'GET' | 'POST' | 'PATCH' | 'DELETE' = 'GET',
-    body?: any
-  ): Promise<any> {
-    const cleanPath = endpointPath.replace(/^\/+/, '');
-
-    const baseUrl = session.instanceUrl.replace(/\/+$/, '');
-
-    const url =
-      `${baseUrl}/services/apexrest/civictax/v1/${cleanPath}`;
-
+    method: SalesforceHttpMethod,
+    body?: unknown
+  ): RequestInit {
     const headers: Record<string, string> = {
       Authorization: `Bearer ${session.accessToken}`,
       Accept: 'application/json',
     };
 
-    if (body !== undefined && ['POST', 'PATCH'].includes(method)) {
+    const hasBody =
+      body !== undefined &&
+      (method === 'POST' || method === 'PATCH');
+
+    if (hasBody) {
       headers['Content-Type'] = 'application/json';
     }
 
-    const requestOptions: RequestInit = {
+    const options: RequestInit = {
       method,
       headers,
     };
 
-    if (body !== undefined && ['POST', 'PATCH'].includes(method)) {
-      requestOptions.body = JSON.stringify(body);
+    if (hasBody) {
+      options.body = JSON.stringify(body);
     }
+
+    return options;
+  }
+
+  // ============================================================
+  // 6. APEX REST API CALL
+  // ============================================================
+
+  public static async callApexRest(
+    session: SalesforceSessionData,
+    endpointPath: string,
+    method: SalesforceHttpMethod = 'GET',
+    body?: unknown
+  ): Promise<any> {
+    if (!session?.accessToken || !session?.instanceUrl) {
+      throw new Error(
+        'A valid Salesforce session is required.'
+      );
+    }
+
+    if (!endpointPath?.trim()) {
+      throw new Error(
+        'Salesforce Apex REST endpoint path is required.'
+      );
+    }
+
+    let url = this.buildApexUrl(
+      session.instanceUrl,
+      endpointPath
+    );
+
+    let requestOptions = this.buildRequestOptions(
+      session,
+      method,
+      body
+    );
 
     // First API request.
     let response = await fetch(url, requestOptions);
 
     // ==========================================================
-    // 5. AUTOMATIC TOKEN REFRESH AND RETRY
+    // 7. AUTOMATIC TOKEN REFRESH AND RETRY
     // ==========================================================
 
     if (response.status === 401) {
@@ -199,38 +256,39 @@ export class SalesforceClient {
         );
       }
 
-      // Update the shared session.
+      // Update access token.
       session.accessToken = refreshed.access_token;
 
+      // Salesforce may return a new instance URL.
       if (refreshed.instance_url) {
         session.instanceUrl = refreshed.instance_url;
       }
 
+      // Update refresh token only if Salesforce returns one.
       if (refreshed.refresh_token) {
         session.refreshToken = refreshed.refresh_token;
       }
 
       session.lastActiveAt = new Date().toISOString();
 
-      // Persist the refreshed token in central encrypted Redis storage.
+      // Persist refreshed session in central Redis storage.
       await SalesforceConnectionStore.save(session);
 
-      // Retry the original request exactly once.
-      const retryHeaders: Record<string, string> = {
-        ...headers,
-        Authorization: `Bearer ${session.accessToken}`,
-      };
+      // Rebuild URL using the updated instance URL.
+      url = this.buildApexUrl(
+        session.instanceUrl,
+        endpointPath
+      );
 
-      const retryOptions: RequestInit = {
+      // Rebuild headers using the updated access token.
+      requestOptions = this.buildRequestOptions(
+        session,
         method,
-        headers: retryHeaders,
-      };
+        body
+      );
 
-      if (body !== undefined && ['POST', 'PATCH'].includes(method)) {
-        retryOptions.body = JSON.stringify(body);
-      }
-
-      response = await fetch(url, retryOptions);
+      // Retry exactly once.
+      response = await fetch(url, requestOptions);
 
       if (response.status === 401) {
         throw new Error(
@@ -240,7 +298,7 @@ export class SalesforceClient {
     }
 
     // ==========================================================
-    // 6. HANDLE API RESPONSE
+    // 8. HANDLE API RESPONSE
     // ==========================================================
 
     if (!response.ok) {
@@ -257,14 +315,14 @@ export class SalesforceClient {
       );
     }
 
-    // Some successful responses contain no body.
+    // Successful response with no content.
     if (response.status === 204) {
       return null;
     }
 
     const responseText = await response.text();
 
-    if (!responseText) {
+    if (!responseText.trim()) {
       return null;
     }
 

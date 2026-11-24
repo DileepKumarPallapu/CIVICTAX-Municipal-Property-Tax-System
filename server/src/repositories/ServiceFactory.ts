@@ -14,6 +14,10 @@ export class BackendServiceFactory {
       }
 
       if (process.env.NODE_ENV !== 'production') {
+        console.warn(
+          'Salesforce is not connected. Using LocalRepository for development.'
+        );
+
         return new LocalRepository();
       }
 
@@ -21,12 +25,11 @@ export class BackendServiceFactory {
         'CENTRAL_SALESFORCE_NOT_CONNECTED: The administrator must connect Salesforce before municipal operations can continue.'
       );
     } catch (error) {
-      // Never silently fall back to local data in production.
+      // Never fall back to local data in production.
       if (process.env.NODE_ENV === 'production') {
         throw error;
       }
 
-      // Local development fallback only.
       console.error(
         'Salesforce connection unavailable:',
         error instanceof Error ? error.message : error

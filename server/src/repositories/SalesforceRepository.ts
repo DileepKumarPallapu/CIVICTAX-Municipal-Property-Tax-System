@@ -1,4 +1,5 @@
-﻿import { ICivicTaxRepository } from './ICivicTaxRepository.js';
+﻿
+import { ICivicTaxRepository } from './ICivicTaxRepository.js';
 import {
   IProperty,
   ITaxAssessment,
@@ -10,9 +11,9 @@ import {
 import { SalesforceSessionData } from '../types/index.js';
 import { SalesforceClient } from '../services/salesforceClient.js';
 
-type SalesforceRecord = {
-  [key: string]: any;
-};
+type SalesforceRecord = Record<string, any>;
+
+type SalesforceHttpMethod = 'GET' | 'POST' | 'PATCH';
 
 export class SalesforceRepository implements ICivicTaxRepository {
   constructor(private readonly session: SalesforceSessionData) {
@@ -23,7 +24,7 @@ export class SalesforceRepository implements ICivicTaxRepository {
 
   private async call(
     endpoint: string,
-    method: 'GET' | 'POST' | 'PATCH' = 'GET',
+    method: SalesforceHttpMethod = 'GET',
     body?: unknown
   ): Promise<any> {
     return SalesforceClient.callApexRest(
@@ -36,94 +37,65 @@ export class SalesforceRepository implements ICivicTaxRepository {
 
   private unsupported(operation: string): never {
     throw new Error(
-      `${operation} is not available in the current Salesforce Apex REST API.`
+      `${operation} is not implemented by the current Salesforce Apex REST API.`
     );
   }
 
-  private mapProperty(record: SalesforceRecord): IProperty {
-    const category = String(
-      record.Property_Category__c ?? 'RESIDENTIAL'
-    ).toUpperCase();
+  private getNumber(value: unknown, fallback = 0): number {
+    if (value === null || value === undefined || value === '') {
+      return fallback;
+    }
 
-    const validCategories = [
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
+  private getString(value: unknown, fallback = ''): string {
+    return value === null || value === undefined
+      ? fallback
+      : String(value);
+  }
+
+  private normalizeCategory(value: unknown): IProperty['category'] {
+    const category = this.getString(value, 'RESIDENTIAL').toUpperCase();
+
+    const allowed: IProperty['category'][] = [
       'RESIDENTIAL',
       'COMMERCIAL',
       'INDUSTRIAL',
       'AGRICULTURAL',
     ];
 
-    const verificationStatus = String(
-      record.Verification_Status__c ?? 'PENDING'
-    ).toUpperCase();
+    return allowed.includes(category as IProperty['category'])
+      ? (category as IProperty['category'])
+      : 'RESIDENTIAL';
+  }
 
-    const validStatuses = [
+  private normalizeVerificationStatus(
+    value: unknown
+  ): IProperty['verificationStatus'] {
+    const status = this.getString(value, 'PENDING').toUpperCase();
+
+    const allowed: IProperty['verificationStatus'][] = [
       'PENDING',
       'VERIFIED',
       'RESUBMISSION_REQUIRED',
       'REJECTED',
     ];
 
-    return {
-      id: record.Id,
-      propertyNumber:
-        record.Property_Number__c ?? record.Name ?? '',
-      ownerId: record.OwnerId ?? record.Property_Owner__c ?? '',
-      ownerName:
-        record.Property_Owner__r?.Name ??
-        record.Owner?.Name ??
-        'Not available',
-      address: record.Property_Address__c ?? '',
-      category: validCategories.includes(category)
-        ? category as IProperty['category']
-        : 'RESIDENTIAL',
-      builtUpArea: Number(record.Built_Up_Area__c ?? 0),
-      zone: record.Zone__c ?? record.Municipal_Zone__c ?? '',
-      verificationStatus: validStatuses.includes(verificationStatus)
-        ? verificationStatus as IProperty['verificationStatus']
-        : 'PENDING',
-      documentReference: record.Ownership_Document__c ?? '',
-      latitude:
-        record.Latitude__c == null
-          ? undefined
-          : Number(record.Latitude__c),
-      longitude:
-        record.Longitude__c == null
-          ? undefined
-          : Number(record.Longitude__c),
-      constructionYear:
-        record.Construction_Year__c == null
-          ? undefined
-          : Number(record.Construction_Year__c),
-      registrationDate: record.Registration_Date__c ?? '',
-    };
+    return allowed.includes(
+      status as IProperty['verificationStatus']
+    )
+      ? (status as IProperty['verificationStatus'])
+      : 'PENDING';
   }
 
-  private mapAssessment(
-    record: SalesforceRecord,
-    property?: IProperty
-  ): ITaxAssessment {
-    const baseTax = Number(
-      record.Base_Tax__c ?? record.Base_Value__c ?? 0
-    );
+  private normalizeAssessmentStatus(
+    value: unknown
+  ): ITaxAssessment['status'] {
+    const status = this.getString(value, 'DRAFT').toUpperCase();
 
-    const totalTax = Number(
-      record.Total_Tax__c ??
-      record.Total_Amount__c ??
-      baseTax
-    );
-
-    const amountPaid = Number(record.Amount_Paid__c ?? 0);
-
-    const outstandingBalance = Number(
-      record.Outstanding_Amount__c ??
-      Math.max(0, totalTax - amountPaid)
-    );
-
-    const rawStatus = String(
-      record.Assessment_Status__c ?? 'DRAFT'
-    ).toUpperCase();
-
-    const validStatuses = [
+    const allowed: ITaxAssessment['status'][] = [
       'DRAFT',
       'APPROVED',
       'PARTIALLY_PAID',
@@ -131,80 +103,189 @@ export class SalesforceRepository implements ICivicTaxRepository {
       'OVERDUE',
     ];
 
+    return allowed.includes(status as ITaxAssessment['status'])
+      ? (status as ITaxAssessment['status'])
+      : 'DRAFT';
+  }
+
+  private mapProperty(record: SalesforceRecord): IProperty {
+    /*
+     * Both Owner__c and Property_Owner__c are Contact lookups
+     * in the supplied Salesforce metadata.
+     *
+     * Do not use record.OwnerId here: OwnerId identifies the
+     * Salesforce record owner, not necessarily the CivicTax citizen.
+     */
+    const citizenContactId =
+      record.Property_Owner__c ??
+      record.Owner__c ??
+      '';
+
+    const citizenName =
+      record.Property_Owner__r?.Name ??
+      record.Owner__r?.Name ??
+      'Not available';
+
     return {
-      id: record.Id,
-      assessmentNumber:
-        record.Assessment_Number__c ??
-        record.Name ??
-        record.Id,
-      propertyId: record.Property__c ?? '',
-      assessmentYear: record.Assessment_Year__c ?? '',
+      id: this.getString(record.Id),
+      propertyNumber: this.getString(
+        record.Property_Number__c ?? record.Name
+      ),
+      ownerId: this.getString(citizenContactId),
+      ownerName: this.getString(citizenName, 'Not available'),
+      address: this.getString(record.Property_Address__c),
+      category: this.normalizeCategory(
+        record.Property_Category__c
+      ),
+      builtUpArea: this.getNumber(record.Built_Up_Area__c),
+      zone: this.getString(
+        record.Zone__c ?? record.Municipal_Zone__c
+      ),
+      verificationStatus: this.normalizeVerificationStatus(
+        record.Verification_Status__c
+      ),
+      documentReference: this.getString(
+        record.Ownership_Document__c
+      ),
+      latitude:
+        record.Latitude__c == null
+          ? undefined
+          : this.getNumber(record.Latitude__c),
+      longitude:
+        record.Longitude__c == null
+          ? undefined
+          : this.getNumber(record.Longitude__c),
+      constructionYear:
+        record.Construction_Year__c == null
+          ? undefined
+          : this.getNumber(record.Construction_Year__c),
+      registrationDate: this.getString(
+        record.Registration_Date__c
+      ),
+    };
+  }
+
+  private mapAssessment(
+    record: SalesforceRecord,
+    property?: IProperty
+  ): ITaxAssessment {
+    const baseTax = this.getNumber(
+      record.Base_Tax__c ?? record.Base_Value__c
+    );
+
+    const totalTax = this.getNumber(
+      record.Total_Tax__c ?? record.Total_Amount__c,
+      baseTax
+    );
+
+    const amountPaid = this.getNumber(record.Amount_Paid__c);
+
+    const outstandingBalance = this.getNumber(
+      record.Outstanding_Amount__c,
+      Math.max(0, totalTax - amountPaid)
+    );
+
+    return {
+      id: this.getString(record.Id),
+      assessmentNumber: this.getString(
+        record.Assessment_Number__c ?? record.Name ?? record.Id
+      ),
+      propertyId: this.getString(
+        record.Property__c ?? record.Property__r?.Id
+      ),
+      assessmentYear: this.getString(
+        record.Assessment_Year__c
+      ),
       category: property?.category ?? '',
       builtUpArea: property?.builtUpArea ?? 0,
-      appliedRatePerSqFt: Number(
-        record.Applied_Rate_Per_Sq_Ft__c ?? 0
+      appliedRatePerSqFt: this.getNumber(
+        record.Applied_Rate_Per_Sq_Ft__c
       ),
       baseTax,
-      penalty: Number(record.Penalty__c ?? 0),
-      discount: Number(record.Discount__c ?? 0),
+      penalty: this.getNumber(record.Penalty__c),
+      discount: this.getNumber(record.Discount__c),
       totalTax,
       amountPaid,
       outstandingBalance,
-      status: validStatuses.includes(rawStatus)
-        ? rawStatus as ITaxAssessment['status']
-        : 'DRAFT',
-      dueDate: record.Due_Date__c ?? '',
+      status: this.normalizeAssessmentStatus(
+        record.Assessment_Status__c
+      ),
+      dueDate: this.getString(record.Due_Date__c),
     };
   }
 
   private mapPayment(record: SalesforceRecord): ITaxPayment {
+    const rawStatus = this.getString(
+      record.Payment_Status__c,
+      'PENDING'
+    ).toUpperCase();
+
+    const paymentStatus: ITaxPayment['paymentStatus'] =
+      rawStatus === 'SUCCESS' || rawStatus === 'FAILED'
+        ? rawStatus
+        : 'PENDING';
+
     return {
-      id: record.Id,
-      assessmentId: record.Assessment__c ?? '',
-      amountPaid: Number(record.Amount_Paid__c ?? 0),
-      paymentDate: record.Payment_Date__c ?? '',
-      paymentMethod: record.Payment_Method__c ?? '',
-      transactionId: record.Transaction_ID__c ?? '',
-      paymentStatus:
-        record.Payment_Status__c === 'SUCCESS' ||
-        record.Payment_Status__c === 'FAILED'
-          ? record.Payment_Status__c
-          : 'PENDING',
-      receiptNumber: record.Name ?? record.Id,
+      id: this.getString(record.Id),
+      assessmentId: this.getString(
+        record.Assessment__c ?? record.Assessment__r?.Id
+      ),
+      amountPaid: this.getNumber(record.Amount_Paid__c),
+      paymentDate: this.getString(record.Payment_Date__c),
+      paymentMethod: this.getString(record.Payment_Method__c),
+      transactionId: this.getString(record.Transaction_ID__c),
+      paymentStatus,
+      receiptNumber: this.getString(
+        record.Receipt_Number__c ?? record.Name ?? record.Id
+      ),
     };
   }
 
+  // ---------------------------------------------------------
   // PROPERTIES
+  // ---------------------------------------------------------
 
   public async listProperties(
-    filter?: { category?: string; zone?: string; status?: string }
+    filter?: {
+      category?: string;
+      zone?: string;
+      status?: string;
+    }
   ): Promise<IProperty[]> {
     const records = await this.call('properties');
 
     if (!Array.isArray(records)) {
-      throw new Error('Unexpected Salesforce properties response.');
+      throw new Error(
+        'Unexpected Salesforce properties response. Expected an array.'
+      );
     }
 
-    let properties = records.map((record) =>
+    let properties = records.map((record: SalesforceRecord) =>
       this.mapProperty(record)
     );
 
     if (filter?.category) {
+      const category = filter.category.toUpperCase();
+
       properties = properties.filter(
-        (property) => property.category === filter.category
+        property => property.category === category
       );
     }
 
     if (filter?.zone) {
+      const zone = filter.zone.trim().toLowerCase();
+
       properties = properties.filter(
-        (property) => property.zone === filter.zone
+        property => property.zone.trim().toLowerCase() === zone
       );
     }
 
     if (filter?.status) {
+      const status = filter.status.toUpperCase();
+
       properties = properties.filter(
-        (property) =>
-          property.verificationStatus === filter.status
+        property =>
+          property.verificationStatus === status
       );
     }
 
@@ -214,6 +295,10 @@ export class SalesforceRepository implements ICivicTaxRepository {
   public async getPropertyById(
     id: string
   ): Promise<IProperty | null> {
+    if (!id?.trim()) {
+      return null;
+    }
+
     try {
       const record = await this.call(
         `properties/${encodeURIComponent(id)}`
@@ -221,9 +306,12 @@ export class SalesforceRepository implements ICivicTaxRepository {
 
       return record?.Id ? this.mapProperty(record) : null;
     } catch (error: any) {
+      const message = String(error?.message ?? '');
+
       if (
-        error.message?.includes('(404)') ||
-        error.message?.includes('NOT_FOUND')
+        message.includes('(404)') ||
+        message.includes('NOT_FOUND') ||
+        message.includes('NOT_FOUND:')
       ) {
         return null;
       }
@@ -260,6 +348,10 @@ export class SalesforceRepository implements ICivicTaxRepository {
     id: string,
     status: IProperty['verificationStatus']
   ): Promise<IProperty> {
+    if (!id?.trim()) {
+      throw new Error('Property ID is required.');
+    }
+
     const record = await this.call('properties', 'PATCH', {
       propertyId: id,
       status,
@@ -275,7 +367,9 @@ export class SalesforceRepository implements ICivicTaxRepository {
     return this.mapProperty(record);
   }
 
+  // ---------------------------------------------------------
   // ASSESSMENTS
+  // ---------------------------------------------------------
 
   public async listAssessments(
     propertyId?: string
@@ -286,23 +380,29 @@ export class SalesforceRepository implements ICivicTaxRepository {
     ]);
 
     if (!Array.isArray(records)) {
-      throw new Error('Unexpected Salesforce assessments response.');
+      throw new Error(
+        'Unexpected Salesforce assessments response. Expected an array.'
+      );
     }
 
     const propertyMap = new Map(
-      properties.map((property) => [property.id, property])
+      properties.map(property => [property.id, property])
     );
 
-    let assessments = records.map((record) =>
-      this.mapAssessment(
+    let assessments = records.map((record: SalesforceRecord) => {
+      const relatedPropertyId = this.getString(
+        record.Property__c ?? record.Property__r?.Id
+      );
+
+      return this.mapAssessment(
         record,
-        propertyMap.get(record.Property__c)
-      )
-    );
+        propertyMap.get(relatedPropertyId)
+      );
+    });
 
     if (propertyId) {
       assessments = assessments.filter(
-        (assessment) => assessment.propertyId === propertyId
+        assessment => assessment.propertyId === propertyId
       );
     }
 
@@ -316,7 +416,7 @@ export class SalesforceRepository implements ICivicTaxRepository {
 
     return (
       assessments.find(
-        (assessment) =>
+        assessment =>
           assessment.id === id ||
           assessment.assessmentNumber === id
       ) ?? null
@@ -329,7 +429,9 @@ export class SalesforceRepository implements ICivicTaxRepository {
     return this.unsupported('Assessment creation');
   }
 
+  // ---------------------------------------------------------
   // PAYMENTS
+  // ---------------------------------------------------------
 
   public async listPayments(
     _assessmentId?: string
@@ -343,6 +445,19 @@ export class SalesforceRepository implements ICivicTaxRepository {
     payment: ITaxPayment;
     assessment: ITaxAssessment;
   }> {
+    if (!payment.assessmentId) {
+      throw new Error('Assessment ID is required.');
+    }
+
+    if (
+      !Number.isFinite(payment.amountPaid) ||
+      payment.amountPaid <= 0
+    ) {
+      throw new Error(
+        'Payment amount must be a valid number greater than zero.'
+      );
+    }
+
     const currentAssessment = await this.getAssessmentById(
       payment.assessmentId
     );
@@ -351,12 +466,13 @@ export class SalesforceRepository implements ICivicTaxRepository {
       throw new Error('Assessment not found in Salesforce.');
     }
 
-    if (payment.amountPaid <= 0) {
-      throw new Error('Payment amount must be greater than zero.');
-    }
-
-    if (payment.amountPaid > currentAssessment.outstandingBalance) {
-      throw new Error('Payment exceeds the outstanding assessment balance.');
+    if (
+      payment.amountPaid >
+      currentAssessment.outstandingBalance
+    ) {
+      throw new Error(
+        'Payment exceeds the outstanding assessment balance.'
+      );
     }
 
     const record = await this.call('payments', 'POST', {
@@ -374,35 +490,30 @@ export class SalesforceRepository implements ICivicTaxRepository {
 
     const createdPayment = this.mapPayment(record);
 
-    // Apex PaymentService updates the assessment balance atomically.
-    // Reflect the confirmed payment in the returned assessment.
-    const updatedAssessment: ITaxAssessment = {
-      ...currentAssessment,
-      amountPaid:
-        Math.round(
-          (currentAssessment.amountPaid + createdPayment.amountPaid) *
-          100
-        ) / 100,
-      outstandingBalance:
-        Math.round(
-          (currentAssessment.outstandingBalance -
-            createdPayment.amountPaid) *
-          100
-        ) / 100,
-      status:
-        currentAssessment.outstandingBalance -
-          createdPayment.amountPaid <= 0
-          ? 'PAID'
-          : 'PARTIALLY_PAID',
-    };
+    /*
+     * The payment endpoint must update the assessment in Apex.
+     * The returned assessment below is a local projection.
+     * Refresh the assessment from Salesforce for authoritative values.
+     */
+    const refreshedAssessment = await this.getAssessmentById(
+      payment.assessmentId
+    );
+
+    if (!refreshedAssessment) {
+      throw new Error(
+        'Payment was created, but the updated assessment could not be retrieved.'
+      );
+    }
 
     return {
       payment: createdPayment,
-      assessment: updatedAssessment,
+      assessment: refreshedAssessment,
     };
   }
 
+  // ---------------------------------------------------------
   // GRIEVANCES
+  // ---------------------------------------------------------
 
   public async listGrievances(
     _citizenId?: string
@@ -426,7 +537,9 @@ export class SalesforceRepository implements ICivicTaxRepository {
     return this.unsupported('Grievance resolution');
   }
 
+  // ---------------------------------------------------------
   // REASSESSMENTS
+  // ---------------------------------------------------------
 
   public async listReassessments(
     _propertyId?: string
@@ -443,40 +556,54 @@ export class SalesforceRepository implements ICivicTaxRepository {
     return this.unsupported('Reassessment creation');
   }
 
+  // ---------------------------------------------------------
   // DASHBOARD
+  // ---------------------------------------------------------
 
   public async getDashboardMetrics(): Promise<IDashboardMetrics> {
     const record = await this.call('dashboard');
 
     if (!record || typeof record !== 'object') {
-      throw new Error('Unexpected Salesforce dashboard response.');
+      throw new Error(
+        'Unexpected Salesforce dashboard response.'
+      );
     }
 
-    const totalProperties = Number(record.totalProperties ?? 0);
-    const verifiedProperties = Number(
-      record.verifiedProperties ?? 0
-    );
-    const pendingVerifications = Number(
-      record.pendingProperties ?? 0
-    );
-    const totalTaxAssessed = Number(
-      record.totalAssessedTax ??
-      record.totalTaxAssessed ??
-      0
-    );
-    const totalRevenueCollected = Number(
-      record.totalRevenueCollected ?? 0
+    const totalProperties = this.getNumber(
+      record.totalProperties
     );
 
-    const totalOutstandingDues = Math.max(
-      0,
-      totalTaxAssessed - totalRevenueCollected
+    const verifiedProperties = this.getNumber(
+      record.verifiedProperties
+    );
+
+    const pendingVerifications = this.getNumber(
+      record.pendingProperties ??
+      record.pendingVerifications
+    );
+
+    const totalTaxAssessed = this.getNumber(
+      record.totalAssessedTax ??
+      record.totalTaxAssessed
+    );
+
+    const totalRevenueCollected = this.getNumber(
+      record.totalRevenueCollected
+    );
+
+    const totalOutstandingDues = this.getNumber(
+      record.totalOutstandingDues,
+      Math.max(
+        0,
+        totalTaxAssessed - totalRevenueCollected
+      )
     );
 
     const collectionEfficiencyRate =
       totalTaxAssessed > 0
         ? Math.round(
-            (totalRevenueCollected / totalTaxAssessed) * 10000
+            (totalRevenueCollected / totalTaxAssessed) *
+            10000
           ) / 100
         : 0;
 
@@ -489,9 +616,12 @@ export class SalesforceRepository implements ICivicTaxRepository {
       totalOutstandingDues,
       collectionEfficiencyRate,
 
-      // The current Apex dashboard does not expose grievance metrics.
-      // This is a placeholder, not an authoritative grievance count.
-      openGrievances: 0,
+      // The current dashboard Apex response does not provide
+      // an authoritative grievance count.
+      openGrievances: this.getNumber(
+        record.openGrievances,
+        0
+      ),
     };
   }
 }
