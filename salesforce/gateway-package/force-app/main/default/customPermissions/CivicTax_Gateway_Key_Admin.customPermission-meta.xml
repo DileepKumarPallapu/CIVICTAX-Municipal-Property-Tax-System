@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomPermission xmlns="http://soap.sforce.com/2006/04/metadata">
+    <description>Allows controlled write-only provisioning and rotation of CivicTax gateway keys.</description>
+    <label>CivicTax Gateway Key Administrator</label>
+</CustomPermission>

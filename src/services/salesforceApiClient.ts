@@ -4,6 +4,12 @@ export const BACKEND_BASE =
   (import.meta.env.VITE_BACKEND_URL as string) ||
   'http://localhost:3001';
 
+function notifySessionExpired(status: number): void {
+  if (status === 401 && typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('civictax:session-expired'));
+  }
+}
+
 export class SalesforceApiClient {
   // Check live connection status of Salesforce integration
   public static async checkConnectionStatus() {
@@ -11,6 +17,7 @@ export class SalesforceApiClient {
       const res = await fetch(`${BACKEND_BASE}/api/salesforce/status`, {
         credentials: 'include',
       });
+      notifySessionExpired(res.status);
       if (!res.ok) {
         return { connected: false, error: `Server status error (${res.status})` };
       }
@@ -25,6 +32,7 @@ export class SalesforceApiClient {
     const res = await fetch(`${BACKEND_BASE}/api/salesforce/verify`, {
       credentials: 'include',
     });
+    notifySessionExpired(res.status);
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       throw new Error(data.message || 'Salesforce API Verification failed');
@@ -37,6 +45,7 @@ export class SalesforceApiClient {
     const res = await fetch(`${BACKEND_BASE}/auth/salesforce/logout`, {
       method: 'POST',
       credentials: 'include',
+      headers: { 'x-civictax-csrf': '1' },
     });
     return await res.json();
   }
@@ -57,6 +66,7 @@ export class SalesforceApiClient {
       credentials: 'include',
       body: body ? JSON.stringify(body) : undefined,
     });
+    notifySessionExpired(res.status);
 
     if (!res.ok) {
       const errData = await res.json().catch(() => ({}));

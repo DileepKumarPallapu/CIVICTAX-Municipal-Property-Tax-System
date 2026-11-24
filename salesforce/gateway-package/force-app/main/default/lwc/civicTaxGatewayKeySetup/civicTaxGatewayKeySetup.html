@@ -1,0 +1,50 @@
+<template>
+    <lightning-card title="CivicTax Gateway Key Setup" icon-name="utility:lock">
+        <div class="slds-p-around_medium">
+            <p class="slds-m-bottom_small">
+                Keys are written to protected package configuration and are never displayed after saving.
+            </p>
+            <lightning-input
+                label="Active key ID"
+                value={activeKeyId}
+                onchange={handleActiveKeyId}
+                required>
+            </lightning-input>
+            <lightning-input
+                class="slds-m-top_small"
+                type="password"
+                label="Active HMAC key (minimum 32 characters)"
+                value={activeSecret}
+                onchange={handleActiveSecret}
+                required>
+            </lightning-input>
+            <lightning-input
+                class="slds-m-top_small"
+                label="Previous key ID (optional)"
+                value={previousKeyId}
+                onchange={handlePreviousKeyId}>
+            </lightning-input>
+            <lightning-input
+                class="slds-m-top_small"
+                type="password"
+                label="Previous HMAC key (optional)"
+                value={previousSecret}
+                onchange={handlePreviousSecret}>
+            </lightning-input>
+            <lightning-input
+                class="slds-m-top_small"
+                type="datetime"
+                label="Previous key expiry (maximum 24 hours)"
+                value={previousKeyExpiresAt}
+                onchange={handlePreviousKeyExpiresAt}>
+            </lightning-input>
+            <lightning-button
+                class="slds-m-top_medium"
+                label="Save keys"
+                variant="brand"
+                onclick={saveKeys}
+                disabled={isSaving}>
+            </lightning-button>
+        </div>
+    </lightning-card>
+</template>

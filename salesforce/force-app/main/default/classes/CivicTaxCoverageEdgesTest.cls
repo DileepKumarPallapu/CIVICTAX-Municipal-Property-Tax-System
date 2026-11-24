@@ -249,6 +249,23 @@ private class CivicTaxCoverageEdgesTest {
     }
 
     @IsTest
+    static void restRejectsInvalidIdentifiersWithSafeValidationErrors() {
+        RestRequest request = new RestRequest();
+        RestResponse response = new RestResponse();
+        request.requestURI = '/services/apexrest/civictax/v1/reassessments/not-an-id';
+        request.httpMethod = 'GET';
+        RestContext.request = request;
+        RestContext.response = response;
+
+        CivicTaxRestResource.handleGet();
+
+        String responseText = response.responseBody.toString();
+        System.assertEquals(400, response.statusCode);
+        System.assert(responseText.contains('Property ID is invalid.'));
+        System.assertEquals(false, responseText.contains('System.TypeException'));
+    }
+
+    @IsTest
     static void recursionControlCanBeResetAndMarked() {
         CivicTaxRecursionControl.resetAll();
         Property__c propertyRecord = new Property__c(

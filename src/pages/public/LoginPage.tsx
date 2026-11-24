@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Eye, EyeOff, Lock, Mail, ShieldAlert, ArrowRight, UserCheck, Shield, User } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -11,7 +11,13 @@ export const LoginPage: React.FC = () => {
   const [errorMessage, setErrorMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const { login, isAuthenticated, role, isLoading } = useAuth();
+  const {
+    login,
+    loginWithSalesforce,
+    isAuthenticated,
+    role,
+    isLoading,
+  } = useAuth();
   const { success, error: toastError } = useToast();
   const navigate = useNavigate();
 
@@ -27,6 +33,27 @@ export const LoginPage: React.FC = () => {
       }
     }
   }, [isAuthenticated, role, isLoading, navigate]);
+
+  useEffect(() => {
+    const authError = new URLSearchParams(window.location.search).get(
+      'auth_error'
+    );
+    if (!authError) return;
+
+    const messages: Record<string, string> = {
+      Invalid_OAuth_State:
+        'The sign-in request expired or could not be verified. Please try again.',
+      Salesforce_Consent_Failed:
+        'Salesforce sign-in was cancelled or denied.',
+      CivicTax_Account_Not_Authorized:
+        'This Salesforce account does not have an active CivicTax account.',
+      Authentication_Unavailable:
+        'Sign-in is temporarily unavailable. Please try again later.',
+    };
+    setErrorMessage(
+      messages[authError] || 'Salesforce sign-in failed. Please try again.'
+    );
+  }, []);
 
   const handleLogin = async (e?: React.FormEvent, customEmail?: string, customPassword?: string) => {
     if (e) e.preventDefault();
@@ -88,6 +115,25 @@ export const LoginPage: React.FC = () => {
           </p>
         </div>
 
+        {!import.meta.env.DEV && (
+          <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
+            <button
+              type="button"
+              onClick={loginWithSalesforce}
+              disabled={isLoading}
+              className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-bold text-sm flex items-center justify-center gap-2 transition shadow-md shadow-blue-500/20"
+            >
+              {isLoading ? 'Connecting to Salesforce…' : 'Sign in with Salesforce'}
+              <ArrowRight className="w-4 h-4" />
+            </button>
+            <p className="mt-3 text-center text-xs text-slate-500 dark:text-slate-400">
+              Your CivicTax access is determined by your active Salesforce account mapping.
+            </p>
+          </div>
+        )}
+
+        {import.meta.env.DEV && (
+        <>
         {/* 1-Click Demo Account Quick Select */}
         <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-2.5">
           <div className="flex items-center justify-between text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
@@ -199,7 +245,7 @@ export const LoginPage: React.FC = () => {
 
           <div className="pt-2 text-center text-xs text-slate-500 dark:text-slate-400">
             Need to register a fresh demo citizen?{' '}
-            <Link to="/register-demo" className="text-blue-600 dark:text-blue-400 font-bold hover:underline">
+            <Link to="/demo-registration" className="text-blue-600 dark:text-blue-400 font-bold hover:underline">
               Create Demo Account
             </Link>
           </div>
@@ -209,9 +255,11 @@ export const LoginPage: React.FC = () => {
         <div className="p-3.5 rounded-2xl bg-amber-50/80 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 text-[11px] text-amber-800 dark:text-amber-300 flex items-start gap-2.5">
           <ShieldAlert className="w-4 h-4 flex-shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
           <p className="leading-relaxed">
-            <strong>Demonstration Notice:</strong> Authentication is handled via local browser session persistence for academic review. In Phase 2, this will be wired to Salesforce Connected App OAuth 2.0 & Lightning Identity.
+            <strong>Development-only demo:</strong> These fixture accounts are unavailable in production. Production sign-in uses Salesforce and an active CivicTax account mapping.
           </p>
         </div>
+        </>
+        )}
       </div>
     </div>
   );

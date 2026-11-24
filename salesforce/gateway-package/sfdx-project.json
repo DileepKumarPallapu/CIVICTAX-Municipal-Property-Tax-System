@@ -1,0 +1,21 @@
+{
+  "packageDirectories": [
+    {
+      "versionName": "ver 0.1",
+      "versionNumber": "0.1.0.NEXT",
+      "path": "force-app",
+      "default": true,
+      "package": "CivicTax Gateway Security",
+      "versionDescription": "Namespaced HMAC gateway authentication, replay protection, and controlled key provisioning for CivicTax."
+    }
+  ],
+  "name": "civictax-gateway-security",
+  "namespace": "civictaxapp",
+  "sfdcLoginUrl": "https://login.salesforce.com",
+  "sourceApiVersion": "60.0",
+  "packageAliases": {
+    "CivicTax Gateway Security": "0Hofj00000066txCAA",
+    "CivicTax Gateway Security@0.1.0-1": "04tfj000000nVKPAA2",
+    "CivicTax Gateway Security@0.1.0-2": "04tfj000000nVM1AAM"
+  }
+}

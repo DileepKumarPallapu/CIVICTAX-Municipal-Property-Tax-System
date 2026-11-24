@@ -2,6 +2,7 @@
 import { ICivicTaxRepository } from './ICivicTaxRepository.js';
 import {
   IProperty,
+  IPropertyDetailsUpdate,
   ITaxAssessment,
   ITaxPayment,
   IGrievance,
@@ -16,9 +17,15 @@ type SalesforceRecord = Record<string, any>;
 type SalesforceHttpMethod = 'GET' | 'POST' | 'PATCH';
 
 export class SalesforceRepository implements ICivicTaxRepository {
-  constructor(private readonly session: SalesforceSessionData) {
+  constructor(
+    private readonly session: SalesforceSessionData,
+    private readonly civicTaxUserId: string
+  ) {
     if (!session?.accessToken || !session?.instanceUrl) {
       throw new Error('A valid Salesforce session is required.');
+    }
+    if (!civicTaxUserId?.trim()) {
+      throw new Error('An authenticated CivicTax user is required.');
     }
   }
 
@@ -31,7 +38,8 @@ export class SalesforceRepository implements ICivicTaxRepository {
       this.session,
       endpoint,
       method,
-      body
+      body,
+      this.civicTaxUserId
     );
   }
 
@@ -250,6 +258,7 @@ export class SalesforceRepository implements ICivicTaxRepository {
       category?: string;
       zone?: string;
       status?: string;
+      ownerId?: string;
     }
   ): Promise<IProperty[]> {
     const records = await this.call('properties');
@@ -264,6 +273,7 @@ export class SalesforceRepository implements ICivicTaxRepository {
       this.mapProperty(record)
     );
 
+    // Apex filters citizen results using the signed CivicTax identity and mapped Contact.
     if (filter?.category) {
       const category = filter.category.toUpperCase();
 
@@ -293,7 +303,8 @@ export class SalesforceRepository implements ICivicTaxRepository {
   }
 
   public async getPropertyById(
-    id: string
+    id: string,
+    _requesterId?: string
   ): Promise<IProperty | null> {
     if (!id?.trim()) {
       return null;
@@ -341,6 +352,44 @@ export class SalesforceRepository implements ICivicTaxRepository {
       );
     }
 
+    return this.mapProperty(record);
+  }
+
+  public async updatePropertyDetails(
+    id: string,
+    updates: IPropertyDetailsUpdate,
+    _requesterId?: string
+  ): Promise<IProperty> {
+    if (!id.trim()) {
+      throw new Error('Property ID is required.');
+    }
+
+    const payload: Record<string, unknown> = {};
+    if (updates.address !== undefined) payload.address = updates.address;
+    if (updates.category !== undefined) payload.category = updates.category;
+    if (updates.builtUpArea !== undefined) payload.builtUpArea = updates.builtUpArea;
+    if (updates.zone !== undefined) payload.zone = updates.zone;
+    if (updates.documentReference !== undefined) {
+      payload.documentReference = updates.documentReference;
+    }
+    if (updates.constructionYear !== undefined) {
+      payload.constructionYear = updates.constructionYear;
+    }
+    if (updates.latitude !== undefined) payload.latitude = updates.latitude;
+    if (updates.longitude !== undefined) payload.longitude = updates.longitude;
+
+    if (Object.keys(payload).length === 0) {
+      throw new Error('At least one property field must be provided.');
+    }
+
+    const record = await this.call(
+      `properties/${encodeURIComponent(id)}`,
+      'PATCH',
+      payload
+    );
+    if (!record?.Id) {
+      throw new Error('Salesforce did not return the updated property record.');
+    }
     return this.mapProperty(record);
   }
 

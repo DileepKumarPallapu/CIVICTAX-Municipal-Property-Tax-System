@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomObject xmlns="http://soap.sforce.com/2006/04/metadata">
+    <deploymentStatus>Deployed</deploymentStatus>
+    <enableActivities>false</enableActivities>
+    <enableFeeds>false</enableFeeds>
+    <enableHistory>false</enableHistory>
+    <enableReports>false</enableReports>
+    <enableSearch>false</enableSearch>
+    <enableSharing>true</enableSharing>
+    <externalSharingModel>Private</externalSharingModel>
+    <label>CivicTax Gateway Nonce</label>
+    <nameField>
+        <displayFormat>CTGN-{000000}</displayFormat>
+        <label>Nonce Record Number</label>
+        <type>AutoNumber</type>
+    </nameField>
+    <pluralLabel>CivicTax Gateway Nonces</pluralLabel>
+    <sharingModel>Private</sharingModel>
+</CustomObject>

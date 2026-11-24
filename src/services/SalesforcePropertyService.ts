@@ -39,7 +39,7 @@ export class SalesforcePropertyService implements IPropertyService {
 
     if (!response.ok || result.success === false) {
       throw new Error(
-        result.error || result.message || `CivicTax API error (${response.status})`
+        result.message || result.error || `CivicTax API error (${response.status})`
       );
     }
 
@@ -135,12 +135,8 @@ export class SalesforcePropertyService implements IPropertyService {
       );
     }
 
-    if (filter?.ownerId) {
-      properties = properties.filter(
-        (property) => property.ownerId === filter.ownerId
-      );
-    }
-
+    // The backend/Salesforce scopes citizens by signed identity; Salesforce Contact IDs
+    // are not comparable to CivicTax user IDs supplied by the UI.
     return properties;
   }
 
@@ -182,8 +178,6 @@ export class SalesforcePropertyService implements IPropertyService {
       {
         method: 'POST',
         body: JSON.stringify({
-          ownerId: data.ownerId,
-          ownerName: data.ownerName,
           address: data.address,
           category: data.category,
           zone: data.zoneName || data.zoneId,
@@ -211,7 +205,16 @@ export class SalesforcePropertyService implements IPropertyService {
       `/api/properties/${encodeURIComponent(id)}`,
       {
         method: 'PATCH',
-        body: JSON.stringify(data),
+        body: JSON.stringify({
+          address: data.address,
+          category: data.category,
+          builtUpArea: data.builtUpArea,
+          zone: data.zoneName || data.zoneId,
+          documentReference: data.documentReference,
+          constructionYear: data.constructionYear,
+          latitude: data.latitude,
+          longitude: data.longitude,
+        }),
       }
     );
 

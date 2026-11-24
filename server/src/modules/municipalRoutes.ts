@@ -1,8 +1,16 @@
 
 import { Router, Request, Response } from 'express';
 import { BackendServiceFactory } from '../repositories/ServiceFactory.js';
+import { IPropertyDetailsUpdate } from '../repositories/types.js';
 import { config } from '../config/index.js';
+import { verifyCsrf } from '../middleware/csrf.js';
+import {
+  getAuthenticatedUser,
+  requireCivicTaxUser,
+  requireRole,
+} from '../middleware/auth.js';
 import { SalesforceConnectionStore } from '../services/salesforceConnectionStore.js';
+import { SalesforceApiError } from '../services/salesforceClient.js';
 
 export const municipalApiRouter = Router();
 
@@ -10,8 +18,13 @@ export const municipalApiRouter = Router();
 // CENTRAL REPOSITORY ACCESS
 // ============================================================
 
-const getRequestRepository = () =>
-  BackendServiceFactory.getRepository();
+const getRequestRepository = (req: Request) => {
+  const user = getAuthenticatedUser(req);
+  if (!user) {
+    throw new Error('CIVICTAX_UNAUTHENTICATED');
+  }
+  return BackendServiceFactory.getRepository(user.id);
+};
 
 // ============================================================
 // 1. HEALTH & SYSTEM STATUS
@@ -30,7 +43,7 @@ municipalApiRouter.get(
         timestamp: new Date().toISOString(),
         dataProvider: session
           ? 'SalesforceRepository (Central Salesforce Connection)'
-          : process.env.NODE_ENV === 'production'
+          : config.isProduction
             ? 'Salesforce Not Connected'
             : 'LocalRepository (Development Only)',
       });
@@ -75,6 +88,12 @@ municipalApiRouter.get(
   }
 );
 
+municipalApiRouter.use(
+  '/api',
+  verifyCsrf,
+  requireCivicTaxUser
+);
+
 // ============================================================
 // 2. PROPERTIES
 // ============================================================
@@ -85,8 +104,9 @@ municipalApiRouter.get(
   async (req: Request, res: Response) => {
     try {
       const { category, zone, status } = req.query;
+      const user = req.session.civicTaxUser!;
 
-      const repository = await getRequestRepository();
+      const repository = await getRequestRepository(req);
 
       const properties = await repository.listProperties({
         category:
@@ -95,6 +115,7 @@ municipalApiRouter.get(
           typeof zone === 'string' ? zone : undefined,
         status:
           typeof status === 'string' ? status : undefined,
+        ownerId: user.role === 'CITIZEN' ? user.id : undefined,
       });
 
       res.json({
@@ -103,9 +124,17 @@ municipalApiRouter.get(
         data: properties,
       });
     } catch (err: any) {
-      res.status(500).json({
+      const status = err instanceof SalesforceApiError
+        ? err.statusCode
+        : 500;
+      res.status(status).json({
         success: false,
-        error: err.message,
+        error: status === 403 ? 'FORBIDDEN' : 'PROPERTY_LIST_FAILED',
+        message: status === 403
+          ? 'You do not have permission to list these properties.'
+          : err instanceof Error
+            ? err.message
+            : 'Unable to retrieve properties.',
       });
     }
   }
@@ -117,7 +146,6 @@ municipalApiRouter.post(
   async (req: Request, res: Response) => {
     try {
       const {
-        propertyNumber,
         address,
         category,
         builtUpArea,
@@ -126,12 +154,21 @@ municipalApiRouter.post(
         constructionYear,
         latitude,
         longitude,
-        ownerId,
-        ownerName,
       } = req.body;
 
+      const user = req.session.civicTaxUser!;
+      if (user.role !== 'CITIZEN') {
+        res.status(403).json({
+          success: false,
+          error: 'FORBIDDEN',
+          message: 'Only authenticated citizens can register their properties.',
+        });
+        return;
+      }
+
       if (
-        !address ||
+        typeof address !== 'string' ||
+        address.trim().length < 10 ||
         !category ||
         builtUpArea === undefined ||
         builtUpArea === null ||
@@ -169,25 +206,55 @@ municipalApiRouter.post(
         return;
       }
 
-      const generatedPropertyNumber =
-        propertyNumber ||
-        `CT-${new Date().getFullYear()}-${Date.now()}`;
+      const currentYear = new Date().getFullYear();
+      const parsedConstructionYear = Number(constructionYear);
+      if (
+        !Number.isInteger(parsedConstructionYear) ||
+        parsedConstructionYear < 1900 ||
+        parsedConstructionYear > currentYear
+      ) {
+        res.status(400).json({
+          success: false,
+          error: `Construction year must be between 1900 and ${currentYear}`,
+        });
+        return;
+      }
 
-      const repository = await getRequestRepository();
+      if (typeof zone !== 'string' || !zone.trim()) {
+        res.status(400).json({
+          success: false,
+          error: 'Municipal zone is required',
+        });
+        return;
+      }
+
+      if (
+        typeof documentReference !== 'string' ||
+        documentReference.trim().length < 5
+      ) {
+        res.status(400).json({
+          success: false,
+          error: 'Ownership document reference must be at least 5 characters',
+        });
+        return;
+      }
+
+      const generatedPropertyNumber =
+        `CT-${currentYear}-${Date.now()}`;
+
+      const repository = await getRequestRepository(req);
 
       const created = await repository.createProperty({
         propertyNumber: generatedPropertyNumber,
-        ownerId: ownerId || 'usr-citizen-01',
-        ownerName: ownerName || 'Rajesh Kumar Sharma',
+        ownerId: user.id,
+        ownerName: user.name,
         address: String(address).trim(),
         category,
         builtUpArea: area,
-        zone: zone || 'Z-CENTRAL',
+        zone: zone.trim(),
         verificationStatus: 'PENDING',
-        documentReference: documentReference || 'DOC-PENDING',
-        constructionYear: constructionYear
-          ? Number(constructionYear)
-          : undefined,
+        documentReference: documentReference.trim(),
+        constructionYear: parsedConstructionYear,
         latitude:
           latitude !== undefined ? Number(latitude) : undefined,
         longitude:
@@ -200,9 +267,27 @@ municipalApiRouter.post(
         data: created,
       });
     } catch (err: any) {
-      res.status(400).json({
+      const message = err instanceof Error
+        ? err.message
+        : 'Salesforce property registration failed.';
+      const duplicate = /already registered|already exists|DUPLICATE_VALUE/i.test(
+        message
+      );
+      const status = duplicate
+        ? 409
+        : err instanceof SalesforceApiError
+          ? err.statusCode
+          : 502;
+      res.status(status).json({
         success: false,
-        error: err.message,
+        error: status === 409
+          ? 'PROPERTY_ALREADY_REGISTERED'
+          : status === 400
+            ? 'PROPERTY_VALIDATION_FAILED'
+            : status === 403
+              ? 'FORBIDDEN'
+              : 'PROPERTY_REGISTRATION_FAILED',
+        message,
       });
     }
   }
@@ -213,8 +298,11 @@ municipalApiRouter.get(
   '/api/properties/:id',
   async (req: Request, res: Response) => {
     try {
-      const repository = await getRequestRepository();
-      const prop = await repository.getPropertyById(req.params.id);
+      const repository = await getRequestRepository(req);
+      const prop = await repository.getPropertyById(
+        req.params.id,
+        req.session.civicTaxUser!.id
+      );
 
       if (!prop) {
         res.status(404).json({
@@ -229,9 +317,168 @@ municipalApiRouter.get(
         data: prop,
       });
     } catch (err: any) {
-      res.status(500).json({
+      const message = err instanceof Error ? err.message : '';
+      const status = err instanceof SalesforceApiError
+        ? err.statusCode
+        : message.includes('Access Denied')
+          ? 403
+          : 500;
+      res.status(status).json({
         success: false,
-        error: err.message,
+        error: status === 403
+          ? 'FORBIDDEN'
+          : status === 404
+            ? 'PROPERTY_NOT_FOUND'
+            : 'PROPERTY_LOOKUP_FAILED',
+        message: status === 403
+          ? 'You do not have permission to access this property.'
+          : status === 404
+            ? 'Property not found.'
+            : 'Unable to retrieve property details.',
+      });
+    }
+  }
+);
+
+// PATCH /api/properties/:id
+municipalApiRouter.patch(
+  '/api/properties/:id',
+  async (req: Request, res: Response) => {
+    const body = req.body ?? {};
+    const updates: IPropertyDetailsUpdate = {};
+    const validCategories = [
+      'RESIDENTIAL',
+      'COMMERCIAL',
+      'INDUSTRIAL',
+      'AGRICULTURAL',
+    ];
+
+    if (body.address !== undefined) {
+      if (typeof body.address !== 'string' || body.address.trim().length < 10) {
+        res.status(400).json({
+          success: false,
+          error: 'Property address must be at least 10 characters',
+        });
+        return;
+      }
+      updates.address = body.address.trim();
+    }
+
+    if (body.category !== undefined) {
+      if (!validCategories.includes(body.category)) {
+        res.status(400).json({
+          success: false,
+          error: 'Invalid property category',
+        });
+        return;
+      }
+      updates.category = body.category;
+    }
+
+    if (body.builtUpArea !== undefined) {
+      const area = Number(body.builtUpArea);
+      if (!Number.isFinite(area) || area <= 0) {
+        res.status(400).json({
+          success: false,
+          error: 'Built-up area must be strictly greater than zero',
+        });
+        return;
+      }
+      updates.builtUpArea = area;
+    }
+
+    if (body.zone !== undefined) {
+      if (typeof body.zone !== 'string' || !body.zone.trim()) {
+        res.status(400).json({
+          success: false,
+          error: 'Municipal zone is required',
+        });
+        return;
+      }
+      updates.zone = body.zone.trim();
+    }
+
+    if (body.documentReference !== undefined) {
+      if (
+        typeof body.documentReference !== 'string' ||
+        body.documentReference.trim().length < 5
+      ) {
+        res.status(400).json({
+          success: false,
+          error: 'Ownership document reference must be at least 5 characters',
+        });
+        return;
+      }
+      updates.documentReference = body.documentReference.trim();
+    }
+
+    if (body.constructionYear !== undefined) {
+      const year = Number(body.constructionYear);
+      if (
+        !Number.isInteger(year) ||
+        year < 1900 ||
+        year > new Date().getFullYear()
+      ) {
+        res.status(400).json({
+          success: false,
+          error: 'Construction year is invalid',
+        });
+        return;
+      }
+      updates.constructionYear = year;
+    }
+
+    for (const coordinate of ['latitude', 'longitude'] as const) {
+      if (body[coordinate] !== undefined) {
+        const value = Number(body[coordinate]);
+        if (!Number.isFinite(value)) {
+          res.status(400).json({
+            success: false,
+            error: `${coordinate} must be numeric`,
+          });
+          return;
+        }
+        updates[coordinate] = value;
+      }
+    }
+
+    if (Object.keys(updates).length === 0) {
+      res.status(400).json({
+        success: false,
+        error: 'At least one supported property field must be provided',
+      });
+      return;
+    }
+
+    try {
+      const repository = await getRequestRepository(req);
+      const updated = await repository.updatePropertyDetails(
+        req.params.id,
+        updates,
+        req.session.civicTaxUser!.id
+      );
+      res.json({
+        success: true,
+        data: updated,
+      });
+    } catch (err: any) {
+      const status = err instanceof SalesforceApiError
+        ? err.statusCode
+        : 502;
+      res.status(status).json({
+        success: false,
+        error: status === 403
+          ? 'FORBIDDEN'
+          : status === 404
+            ? 'PROPERTY_NOT_FOUND'
+            : status === 409
+              ? 'PROPERTY_UPDATE_CONFLICT'
+              : 'PROPERTY_UPDATE_FAILED',
+        message: status === 403
+          ? 'You do not have permission to modify this property.'
+          : err instanceof Error
+            ? err.message
+            : 'Unable to update property details.',
       });
     }
   }
@@ -240,6 +487,7 @@ municipalApiRouter.get(
 // PATCH /api/properties/:id/verify
 municipalApiRouter.patch(
   '/api/properties/:id/verify',
+  requireRole(['OFFICER', 'ADMIN']),
   async (req: Request, res: Response) => {
     try {
       const { status } = req.body;
@@ -259,7 +507,7 @@ municipalApiRouter.patch(
         return;
       }
 
-      const repository = await getRequestRepository();
+      const repository = await getRequestRepository(req);
 
       const updated = await repository.updatePropertyStatus(
         req.params.id,
@@ -293,7 +541,7 @@ municipalApiRouter.get(
           ? req.query.propertyId
           : undefined;
 
-      const repository = await getRequestRepository();
+      const repository = await getRequestRepository(req);
 
       const assessments = await repository.listAssessments(propertyId);
 
@@ -314,6 +562,7 @@ municipalApiRouter.get(
 // POST /api/assessments
 municipalApiRouter.post(
   '/api/assessments',
+  requireRole(['OFFICER', 'ADMIN']),
   async (req: Request, res: Response) => {
     try {
       const {
@@ -355,7 +604,7 @@ municipalApiRouter.post(
         (baseTax - discount + penalty) * 100
       ) / 100;
 
-      const repository = await getRequestRepository();
+      const repository = await getRequestRepository(req);
 
       const assessment = await repository.createAssessment({
         assessmentNumber: `CT-ASM-${Date.now()}`,
@@ -394,7 +643,7 @@ municipalApiRouter.get(
   '/api/assessments/:id',
   async (req: Request, res: Response) => {
     try {
-      const repository = await getRequestRepository();
+      const repository = await getRequestRepository(req);
 
       const assessment = await repository.getAssessmentById(
         req.params.id
@@ -435,7 +684,7 @@ municipalApiRouter.get(
           ? req.query.assessmentId
           : undefined;
 
-      const repository = await getRequestRepository();
+      const repository = await getRequestRepository(req);
 
       const payments = await repository.listPayments(assessmentId);
 
@@ -483,7 +732,7 @@ municipalApiRouter.post(
         return;
       }
 
-      const repository = await getRequestRepository();
+      const repository = await getRequestRepository(req);
 
       const result = await repository.createPayment({
         assessmentId,
@@ -522,7 +771,7 @@ municipalApiRouter.get(
           ? req.query.citizenId
           : undefined;
 
-      const repository = await getRequestRepository();
+      const repository = await getRequestRepository(req);
 
       const grievances = await repository.listGrievances(citizenId);
 
@@ -577,7 +826,7 @@ municipalApiRouter.post(
         return;
       }
 
-      const repository = await getRequestRepository();
+      const repository = await getRequestRepository(req);
 
       const grievance = await repository.createGrievance({
         propertyId,
@@ -616,7 +865,7 @@ municipalApiRouter.get(
           ? req.query.propertyId
           : undefined;
 
-      const repository = await getRequestRepository();
+      const repository = await getRequestRepository(req);
 
       const items = await repository.listReassessments(propertyId);
 
@@ -654,7 +903,7 @@ municipalApiRouter.post(
         return;
       }
 
-      const repository = await getRequestRepository();
+      const repository = await getRequestRepository(req);
 
       const item = await repository.createReassessment({
         propertyId,
@@ -685,9 +934,9 @@ municipalApiRouter.post(
 // GET /api/dashboard
 municipalApiRouter.get(
   '/api/dashboard',
-  async (_req: Request, res: Response) => {
+  async (req: Request, res: Response) => {
     try {
-      const repository = await getRequestRepository();
+      const repository = await getRequestRepository(req);
 
       const metrics = await repository.getDashboardMetrics();
 

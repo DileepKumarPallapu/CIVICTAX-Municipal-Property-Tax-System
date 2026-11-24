@@ -19,6 +19,7 @@ interface AuthContextType {
   role: UserRole | null;
   isLoading: boolean;
   login: (email: string, password?: string) => Promise<User>;
+  loginWithSalesforce: () => void;
   logout: () => Promise<void>;
   updateProfile: (userData: Partial<User>) => Promise<User>;
   refreshSession: () => void;
@@ -28,9 +29,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const mapBackendUser = (backendUser: BackendUser): User => {
   const existingUser = StorageService.getUsers().find(
-    (user) =>
-      user.id === backendUser.id ||
-      user.email.toLowerCase() === backendUser.email.toLowerCase()
+    (user) => user.id === backendUser.id
   );
 
   return {
@@ -52,7 +51,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
 
   const restoreSession = useCallback(async () => {
     try {
-      StorageService.initialize();
+      if (import.meta.env.DEV) {
+        StorageService.initialize();
+      }
 
       const response = await AuthApi.getCurrentUser();
 
@@ -76,6 +77,20 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
  useEffect(() => {
   void restoreSession();
 }, [restoreSession]);
+
+  useEffect(() => {
+    const handleSessionExpired = () => {
+      setCurrentUser(null);
+      StorageService.setCurrentUser(null);
+    };
+    window.addEventListener('civictax:session-expired', handleSessionExpired);
+    return () => {
+      window.removeEventListener(
+        'civictax:session-expired',
+        handleSessionExpired
+      );
+    };
+  }, []);
 
   const refreshSession = useCallback(() => {
     setIsLoading(true);
@@ -105,6 +120,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
     }
   };
 
+  const loginWithSalesforce = (): void => {
+    setIsLoading(true);
+    AuthApi.startSalesforceLogin();
+  };
+
   const logout = async (): Promise<void> => {
     setIsLoading(true);
 
@@ -129,10 +149,16 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
       userData
     );
 
-    setCurrentUser(updated);
-    StorageService.setCurrentUser(updated);
+    const safeUpdatedUser = {
+      ...updated,
+      id: currentUser.id,
+      email: currentUser.email,
+      role: currentUser.role,
+    };
+    setCurrentUser(safeUpdatedUser);
+    StorageService.setCurrentUser(safeUpdatedUser);
 
-    return updated;
+    return safeUpdatedUser;
   };
 
   return (
@@ -143,6 +169,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
         role: currentUser ? currentUser.role : null,
         isLoading,
         login,
+        loginWithSalesforce,
         logout,
         updateProfile,
         refreshSession,

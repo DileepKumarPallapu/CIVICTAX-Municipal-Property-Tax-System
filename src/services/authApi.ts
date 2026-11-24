@@ -20,6 +20,13 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
+    if (
+      response.status === 401 &&
+      path !== '/api/auth/me' &&
+      typeof window !== 'undefined'
+    ) {
+      window.dispatchEvent(new CustomEvent('civictax:session-expired'));
+    }
     throw new Error(data.error || data.message || `Authentication failed (${response.status})`);
   }
 
@@ -31,6 +38,7 @@ export const AuthApi = {
     return request<{ success: boolean; user: BackendUser }>('/api/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
+      headers: { 'X-Requested-With': 'XMLHttpRequest' },
     });
   },
 
@@ -41,6 +49,11 @@ export const AuthApi = {
   logout() {
     return request<{ success: boolean }>('/api/auth/logout', {
       method: 'POST',
+      headers: { 'X-Requested-With': 'XMLHttpRequest' },
     });
+  },
+
+  startSalesforceLogin() {
+    window.location.assign(`${BACKEND_BASE}/auth/salesforce/login`);
   },
 };

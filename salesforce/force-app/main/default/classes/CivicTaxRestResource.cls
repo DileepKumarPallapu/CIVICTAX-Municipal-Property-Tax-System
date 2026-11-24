@@ -6,6 +6,8 @@
 global with sharing class CivicTaxRestResource {
     private static RestResponse responseRef;
 
+    private class GatewayAuthException extends Exception {}
+
     private static String getEndpoint(RestRequest req) {
         return req.requestURI.substringAfter('/civictax/v1/');
     }
@@ -17,6 +19,45 @@ global with sharing class CivicTaxRestResource {
 
     private static String bodyString(RestRequest req) {
         return req.requestBody == null ? '' : req.requestBody.toString();
+    }
+
+    private static void authenticateGatewayRequest(
+        RestRequest request,
+        String endpoint,
+        String bodyText
+    ) {
+        CivicTaxSecurityService.clearRequestIdentity();
+
+        if (Test.isRunningTest()) {
+            try {
+                CivicTaxGatewayAuth.authenticate(request, endpoint, bodyText);
+                return;
+            } catch (CivicTaxGatewayAuth.GatewayAuthException ex) {
+                throw new GatewayAuthException(ex.getMessage());
+            }
+        }
+
+        String authenticatedCivicTaxId;
+        try {
+            authenticatedCivicTaxId =
+                civictaxapp.CivicTaxGatewayAuth.authenticate(request, endpoint, bodyText);
+        } catch (civictaxapp.CivicTaxGatewayAuth.GatewayAuthException ex) {
+            throw new GatewayAuthException(ex.getMessage());
+        }
+
+        CivicTaxSecurityService.setRequestIdentity(authenticatedCivicTaxId);
+        CivicTaxSecurityService.getCurrentCivicTaxUser();
+    }
+
+    private static void writeValidationError(Exception ex) {
+        writeError(400, 'BAD_REQUEST', ex.getMessage());
+    }
+
+    private static void logInternalError(String method, Exception ex) {
+        System.debug(
+            LoggingLevel.ERROR,
+            'CivicTax ' + method + ' internal error (' + ex.getTypeName() + ').'
+        );
     }
 
     private static Id toId(Object value, String fieldName) {
@@ -67,6 +108,7 @@ global with sharing class CivicTaxRestResource {
     global static void handleGet() {
         RestRequest req = RestContext.request;
         responseRef = RestContext.response;
+        CivicTaxSecurityService.clearRequestIdentity();
         String endpoint = getEndpoint(req);
         String bodyText = bodyString(req);
 
@@ -81,7 +123,7 @@ global with sharing class CivicTaxRestResource {
                 return;
             }
 
-            CivicTaxGatewayAuth.authenticate(req, endpoint, bodyText);
+            authenticateGatewayRequest(req, endpoint, bodyText);
 
             if (endpoint == 'properties' || endpoint.startsWith('properties/')) {
                 String identifier = endpoint.startsWith('properties/') ? endpoint.substringAfter('properties/') : null;
@@ -279,13 +321,29 @@ global with sharing class CivicTaxRestResource {
             }
 
             writeError(404, 'ENDPOINT_NOT_FOUND', 'The requested CivicTax endpoint does not exist.');
-        } catch (CivicTaxGatewayAuth.GatewayAuthException ex) {
+        } catch (GatewayAuthException ex) {
             writeError(401, 'GATEWAY_AUTH_FAILED', ex.getMessage());
         } catch (CivicTaxSecurityService.SecurityException ex) {
             writeError(403, 'FORBIDDEN', ex.getMessage());
+        } catch (CivicTaxRestException ex) {
+            writeValidationError(ex);
+        } catch (PropertyService.PropertyException ex) {
+            writeValidationError(ex);
+        } catch (CivicTaxAssessmentService.AssessmentException ex) {
+            writeValidationError(ex);
+        } catch (CivicTaxPaymentService.PaymentException ex) {
+            writeValidationError(ex);
+        } catch (CivicTaxGrievanceService.GrievanceException ex) {
+            writeValidationError(ex);
+        } catch (CivicTaxReassessmentService.ReassessmentException ex) {
+            writeValidationError(ex);
+        } catch (System.JSONException ex) {
+            writeError(400, 'INVALID_REQUEST', 'Request body is invalid.');
+        } catch (System.TypeException ex) {
+            writeError(400, 'INVALID_REQUEST', 'Request contains an invalid value.');
         } catch (Exception ex) {
-            System.debug(LoggingLevel.ERROR, 'CivicTax GET error: ' + ex.getMessage());
-            writeError(400, 'BAD_REQUEST', ex.getMessage());
+            logInternalError('GET', ex);
+            writeError(500, 'INTERNAL_ERROR', 'An unexpected error occurred.');
         }
     }
 
@@ -294,11 +352,12 @@ global with sharing class CivicTaxRestResource {
     global static void handlePost() {
         RestRequest req = RestContext.request;
         responseRef = RestContext.response;
+        CivicTaxSecurityService.clearRequestIdentity();
         String endpoint = getEndpoint(req);
         String bodyText = bodyString(req);
 
         try {
-            CivicTaxGatewayAuth.authenticate(req, endpoint, bodyText);
+            authenticateGatewayRequest(req, endpoint, bodyText);
             Map<String, Object> payload = readBody(bodyText);
 
             if (endpoint == 'properties') {
@@ -389,13 +448,29 @@ global with sharing class CivicTaxRestResource {
             }
 
             writeError(404, 'ENDPOINT_NOT_FOUND', 'The requested CivicTax endpoint does not exist.');
-        } catch (CivicTaxGatewayAuth.GatewayAuthException ex) {
+        } catch (GatewayAuthException ex) {
             writeError(401, 'GATEWAY_AUTH_FAILED', ex.getMessage());
         } catch (CivicTaxSecurityService.SecurityException ex) {
             writeError(403, 'FORBIDDEN', ex.getMessage());
+        } catch (CivicTaxRestException ex) {
+            writeValidationError(ex);
+        } catch (PropertyService.PropertyException ex) {
+            writeValidationError(ex);
+        } catch (CivicTaxAssessmentService.AssessmentException ex) {
+            writeValidationError(ex);
+        } catch (CivicTaxPaymentService.PaymentException ex) {
+            writeValidationError(ex);
+        } catch (CivicTaxGrievanceService.GrievanceException ex) {
+            writeValidationError(ex);
+        } catch (CivicTaxReassessmentService.ReassessmentException ex) {
+            writeValidationError(ex);
+        } catch (System.JSONException ex) {
+            writeError(400, 'INVALID_REQUEST', 'Request body is invalid.');
+        } catch (System.TypeException ex) {
+            writeError(400, 'INVALID_REQUEST', 'Request contains an invalid value.');
         } catch (Exception ex) {
-            System.debug(LoggingLevel.ERROR, 'CivicTax POST error: ' + ex.getMessage());
-            writeError(400, 'BAD_REQUEST', ex.getMessage());
+            logInternalError('POST', ex);
+            writeError(500, 'INTERNAL_ERROR', 'An unexpected error occurred.');
         }
     }
 
@@ -404,11 +479,12 @@ global with sharing class CivicTaxRestResource {
     global static void handlePatch() {
         RestRequest req = RestContext.request;
         responseRef = RestContext.response;
+        CivicTaxSecurityService.clearRequestIdentity();
         String endpoint = getEndpoint(req);
         String bodyText = bodyString(req);
 
         try {
-            CivicTaxGatewayAuth.authenticate(req, endpoint, bodyText);
+            authenticateGatewayRequest(req, endpoint, bodyText);
 
             if (endpoint == 'properties' || endpoint.endsWith('/verify')) {
                 CivicTaxSecurityService.requireCanVerifyProperty();
@@ -494,13 +570,29 @@ global with sharing class CivicTaxRestResource {
             }
 
             writeError(404, 'ENDPOINT_NOT_FOUND', 'The requested CivicTax endpoint does not exist.');
-        } catch (CivicTaxGatewayAuth.GatewayAuthException ex) {
+        } catch (GatewayAuthException ex) {
             writeError(401, 'GATEWAY_AUTH_FAILED', ex.getMessage());
         } catch (CivicTaxSecurityService.SecurityException ex) {
             writeError(403, 'FORBIDDEN', ex.getMessage());
+        } catch (CivicTaxRestException ex) {
+            writeValidationError(ex);
+        } catch (PropertyService.PropertyException ex) {
+            writeValidationError(ex);
+        } catch (CivicTaxAssessmentService.AssessmentException ex) {
+            writeValidationError(ex);
+        } catch (CivicTaxPaymentService.PaymentException ex) {
+            writeValidationError(ex);
+        } catch (CivicTaxGrievanceService.GrievanceException ex) {
+            writeValidationError(ex);
+        } catch (CivicTaxReassessmentService.ReassessmentException ex) {
+            writeValidationError(ex);
+        } catch (System.JSONException ex) {
+            writeError(400, 'INVALID_REQUEST', 'Request body is invalid.');
+        } catch (System.TypeException ex) {
+            writeError(400, 'INVALID_REQUEST', 'Request contains an invalid value.');
         } catch (Exception ex) {
-            System.debug(LoggingLevel.ERROR, 'CivicTax PATCH error: ' + ex.getMessage());
-            writeError(400, 'BAD_REQUEST', ex.getMessage());
+            logInternalError('PATCH', ex);
+            writeError(500, 'INTERNAL_ERROR', 'An unexpected error occurred.');
         }
     }
 

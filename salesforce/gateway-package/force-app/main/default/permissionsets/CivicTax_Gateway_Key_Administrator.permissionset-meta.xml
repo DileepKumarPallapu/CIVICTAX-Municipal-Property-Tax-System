@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<PermissionSet xmlns="http://soap.sforce.com/2006/04/metadata">
+    <classAccesses>
+        <apexClass>CivicTaxGatewayProvisioning</apexClass>
+        <enabled>true</enabled>
+    </classAccesses>
+    <customPermissions>
+        <enabled>true</enabled>
+        <name>CivicTax_Gateway_Key_Admin</name>
+    </customPermissions>
+    <description>Write-only CivicTax gateway key setup access. Assign only to a tightly controlled administrator.</description>
+    <hasActivationRequired>false</hasActivationRequired>
+    <label>CivicTax Gateway Key Administrator</label>
+</PermissionSet>

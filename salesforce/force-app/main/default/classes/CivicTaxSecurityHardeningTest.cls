@@ -735,6 +735,12 @@ private class CivicTaxSecurityHardeningTest {
     @isTest
     static void testPropertyServiceListFiltersToCitizenProperties() {
         User citizen1 = [SELECT Id FROM User WHERE Email = 'citizen1.sec@civictax.test' LIMIT 1];
+        Property__c expectedProperty = [
+            SELECT Id
+            FROM Property__c
+            WHERE Property_Number__c = 'SEC-PROP-001'
+            LIMIT 1
+        ];
 
         System.runAs(citizen1) {
             Test.startTest();
@@ -742,7 +748,7 @@ private class CivicTaxSecurityHardeningTest {
             Test.stopTest();
 
             System.assertEquals(1, props.size(), 'Citizen 1 should only see their 1 owned property');
-            System.assertEquals('SEC-PROP-001', props[0].Property_Number__c);
+            System.assertEquals(expectedProperty.Id, props[0].Id);
         }
     }
 

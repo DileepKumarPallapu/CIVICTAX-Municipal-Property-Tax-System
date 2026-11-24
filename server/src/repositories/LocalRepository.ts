@@ -1,6 +1,14 @@
 // server/src/repositories/LocalRepository.ts
 import { ICivicTaxRepository } from './ICivicTaxRepository.js';
-import { IProperty, ITaxAssessment, ITaxPayment, IGrievance, IReassessment, IDashboardMetrics } from './types.js';
+import {
+  IProperty,
+  IPropertyDetailsUpdate,
+  ITaxAssessment,
+  ITaxPayment,
+  IGrievance,
+  IReassessment,
+  IDashboardMetrics,
+} from './types.js';
 
 export class LocalRepository implements ICivicTaxRepository {
   private properties: IProperty[] = [
@@ -115,17 +123,30 @@ export class LocalRepository implements ICivicTaxRepository {
     },
   ];
 
-  public async listProperties(filter?: { category?: string; zone?: string; status?: string }): Promise<IProperty[]> {
+  public async listProperties(filter?: {
+    category?: string;
+    zone?: string;
+    status?: string;
+    ownerId?: string;
+  }): Promise<IProperty[]> {
     return this.properties.filter((p) => {
       if (filter?.category && p.category !== filter.category) return false;
       if (filter?.zone && p.zone !== filter.zone) return false;
       if (filter?.status && p.verificationStatus !== filter.status) return false;
+      if (filter?.ownerId && p.ownerId !== filter.ownerId) return false;
       return true;
     });
   }
 
-  public async getPropertyById(id: string): Promise<IProperty | null> {
-    return this.properties.find((p) => p.id === id || p.propertyNumber === id) || null;
+  public async getPropertyById(
+    id: string,
+    requesterId?: string
+  ): Promise<IProperty | null> {
+    const property = this.properties.find(
+      (p) => p.id === id || p.propertyNumber === id
+    );
+    if (requesterId && property?.ownerId !== requesterId) return null;
+    return property || null;
   }
 
   public async createProperty(prop: Omit<IProperty, 'id' | 'registrationDate'>): Promise<IProperty> {
@@ -140,6 +161,26 @@ export class LocalRepository implements ICivicTaxRepository {
     };
     this.properties.push(newProp);
     return newProp;
+  }
+
+  public async updatePropertyDetails(
+    id: string,
+    updates: IPropertyDetailsUpdate,
+    requesterId?: string
+  ): Promise<IProperty> {
+    const prop = await this.getPropertyById(id);
+    if (!prop) throw new Error('Property not found');
+    if (requesterId && prop.ownerId !== requesterId) {
+      throw new Error('Access Denied: You do not own this property.');
+    }
+    if (prop.verificationStatus === 'VERIFIED') {
+      throw new Error(
+        'Verified properties cannot be edited directly. Submit a reassessment request.'
+      );
+    }
+
+    Object.assign(prop, updates);
+    return prop;
   }
 
   public async updatePropertyStatus(id: string, status: IProperty['verificationStatus']): Promise<IProperty> {

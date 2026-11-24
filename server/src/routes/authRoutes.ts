@@ -1,9 +1,19 @@
 ﻿
 import { Router, Request, Response } from 'express';
 import { config } from '../config/index.js';
+import { verifyCsrf } from '../middleware/csrf.js';
+import {
+  getAuthenticatedUser,
+  SESSION_COOKIE_NAME,
+} from '../middleware/auth.js';
 import { PKCEUtils } from '../utils/pkce.js';
 import { SalesforceConnectionStore } from '../services/salesforceConnectionStore.js';
 import { SalesforceClient } from '../services/salesforceClient.js';
+import {
+  oauthStateStore,
+  type OAuthFlow,
+  type OAuthStateRecord,
+} from '../services/oauthStateStore.js';
 import {
   SalesforceSessionData,
   SalesforceStatusResponse,
@@ -12,23 +22,24 @@ import {
 
 declare module 'express-session' {
   interface SessionData {
-    oauthState?: string;
-    codeVerifier?: string;
     salesforceSession?: SalesforceSessionData;
     civicTaxUser?: CivicTaxSessionUser;
+    authProvider?: 'salesforce' | 'demo';
+    authenticatedAt?: number;
+    lastActivityAt?: number;
+    oauthStartedAt?: number;
   }
 }
 
 export const authRouter = Router();
 
-// Demo users. Replace with a persistent user database and hashed passwords
-// before production deployment.
+// Development fixtures only. Production authentication always uses Salesforce OAuth.
 const REGISTERED_USERS: Record<
   string,
-  { passwordHash: string; user: CivicTaxSessionUser }
+  { password: string; user: CivicTaxSessionUser }
 > = {
   'admin@civictax.demo': {
-    passwordHash: 'Admin@123',
+    password: 'Admin@123',
     user: {
       id: 'usr-admin-01',
       email: 'admin@civictax.demo',
@@ -37,7 +48,7 @@ const REGISTERED_USERS: Record<
     },
   },
   'officer@civictax.demo': {
-    passwordHash: 'Officer@123',
+    password: 'Officer@123',
     user: {
       id: 'usr-officer-01',
       email: 'officer@civictax.demo',
@@ -46,7 +57,7 @@ const REGISTERED_USERS: Record<
     },
   },
   'citizen@civictax.demo': {
-    passwordHash: 'Citizen@123',
+    password: 'Citizen@123',
     user: {
       id: 'usr-citizen-01',
       email: 'citizen@civictax.demo',
@@ -57,67 +68,144 @@ const REGISTERED_USERS: Record<
 };
 
 function isAuthenticated(req: Request): boolean {
-  return Boolean(req.session.civicTaxUser);
+  return Boolean(getAuthenticatedUser(req));
 }
 
 function isAdmin(req: Request): boolean {
-  return req.session.civicTaxUser?.role === 'ADMIN';
+  return getAuthenticatedUser(req)?.role === 'ADMIN';
+}
+
+function saveSession(req: Request): Promise<void> {
+  return new Promise((resolve, reject) => {
+    req.session.save((error) => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
+}
+
+function regenerateSession(req: Request): Promise<void> {
+  return new Promise((resolve, reject) => {
+    req.session.regenerate((error) => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
+}
+
+function authorizationUrl(
+  state: string,
+  codeVerifier: string,
+  flow: OAuthFlow
+): string {
+  const codeChallenge = PKCEUtils.generateCodeChallenge(codeVerifier);
+  const parameters = new URLSearchParams({
+    response_type: 'code',
+    client_id: config.salesforce.clientId,
+    redirect_uri: config.salesforce.redirectUri,
+    code_challenge: codeChallenge,
+    code_challenge_method: 'S256',
+    state,
+    scope:
+      flow === 'central-salesforce'
+      ? 'api id refresh_token'
+        : 'api id',
+  });
+  if (flow === 'central-salesforce') {
+    parameters.set('prompt', 'login consent');
+  } else {
+    parameters.set('prompt', 'login');
+  }
+  return `${config.salesforce.loginUrl}/services/oauth2/authorize?${parameters.toString()}`;
+}
+
+async function beginOAuthFlow(
+  req: Request,
+  res: Response,
+  flow: OAuthFlow
+): Promise<void> {
+  if (!config.salesforce.clientId || !config.salesforce.redirectUri) {
+    res.status(503).json({
+      error: 'SALESFORCE_OAUTH_NOT_CONFIGURED',
+      message: 'Salesforce authentication is not configured.',
+    });
+    return;
+  }
+
+  const state = PKCEUtils.generateState();
+  const codeVerifier = PKCEUtils.generateCodeVerifier();
+  await oauthStateStore.create(state, {
+    sessionId: req.sessionID,
+    flow,
+    codeVerifier,
+    expiresAt: Date.now() + 10 * 60 * 1000,
+  });
+  req.session.oauthStartedAt = Date.now();
+  await saveSession(req);
+  res.redirect(authorizationUrl(state, codeVerifier, flow));
 }
 
 // POST /api/auth/login
-authRouter.post('/api/auth/login', (req: Request, res: Response) => {
-  const { email, password } = req.body ?? {};
-
-  if (
-    typeof email !== 'string' ||
-    typeof password !== 'string' ||
-    !email.trim() ||
-    !password
-  ) {
-    res.status(400).json({
-      success: false,
-      error: 'Email and password are required',
-    });
-    return;
-  }
-
-  const record = REGISTERED_USERS[email.toLowerCase().trim()];
-
-  if (!record || record.passwordHash !== password) {
-    res.status(401).json({
-      success: false,
-      error: 'Invalid email or password',
-    });
-    return;
-  }
-
-  req.session.regenerate((err) => {
-    if (err) {
-      res.status(500).json({
+authRouter.post(
+  '/api/auth/login',
+  verifyCsrf,
+  (req: Request, res: Response) => {
+    if (config.isProduction) {
+      res.status(503).json({
         success: false,
-        error: 'Unable to create login session',
+        error: 'AUTHENTICATION_NOT_CONFIGURED',
+        message: 'Production authentication has not been configured.',
       });
       return;
     }
 
-    req.session.civicTaxUser = record.user;
+    const { email, password } = req.body ?? {};
 
-    req.session.save((saveError) => {
-      if (saveError) {
+    if (
+      typeof email !== 'string' ||
+      typeof password !== 'string' ||
+      !email.trim() ||
+      !password
+    ) {
+      res.status(400).json({
+        success: false,
+        error: 'Email and password are required',
+      });
+      return;
+    }
+
+    const record = REGISTERED_USERS[email.toLowerCase().trim()];
+
+    if (!record || record.password !== password) {
+      res.status(401).json({
+        success: false,
+        error: 'Invalid email or password',
+      });
+      return;
+    }
+
+    void regenerateSession(req)
+      .then(() => {
+        req.session.civicTaxUser = record.user;
+        req.session.authProvider = 'demo';
+        req.session.authenticatedAt = Date.now();
+        req.session.lastActivityAt = Date.now();
+        return saveSession(req);
+      })
+      .then(() => {
+        res.json({
+          success: true,
+          user: record.user,
+        });
+      })
+      .catch(() => {
         res.status(500).json({
           success: false,
-          error: 'Unable to save login session',
+          error: 'Unable to create login session',
         });
-        return;
-      }
-
-      res.json({
-        success: true,
-        user: record.user,
       });
-    });
-  });
-});
+  }
+);
 
 // GET /api/auth/me
 authRouter.get('/api/auth/me', (req: Request, res: Response) => {
@@ -136,182 +224,172 @@ authRouter.get('/api/auth/me', (req: Request, res: Response) => {
 });
 
 // POST /api/auth/logout
-authRouter.post('/api/auth/logout', (req: Request, res: Response) => {
-  req.session.destroy((err) => {
-    if (err) {
-      res.status(500).json({
-        success: false,
-        error: 'Failed to log out',
-      });
-      return;
-    }
+authRouter.post(
+  '/api/auth/logout',
+  verifyCsrf,
+  (req: Request, res: Response) => {
+    req.session.destroy((err) => {
+      if (err) {
+        res.status(500).json({
+          success: false,
+          error: 'Failed to log out',
+        });
+        return;
+      }
 
-    res.clearCookie('connect.sid');
-    res.json({
-      success: true,
-      message: 'Logged out successfully',
+      res.clearCookie(SESSION_COOKIE_NAME, {
+        path: '/',
+        httpOnly: true,
+        secure: config.isProduction,
+        sameSite: config.isProduction ? 'none' : 'lax',
+      });
+      res.json({
+        success: true,
+        message: 'Logged out successfully',
+      });
     });
-  });
+  }
+);
+
+// GET /auth/salesforce/login
+// Salesforce authenticates the user; CivicTax authorization follows mapping.
+authRouter.get('/auth/salesforce/login', async (req: Request, res: Response) => {
+  try {
+    await beginOAuthFlow(req, res, 'civictax-login');
+  } catch (err) {
+    const errorType = err instanceof Error ? err.name : 'UnknownError';
+    console.error(`CivicTax OAuth initialization failed (${errorType}).`);
+    res.status(503).json({
+      error: 'SALESFORCE_OAUTH_UNAVAILABLE',
+      message: 'Salesforce sign-in could not be started.',
+    });
+  }
 });
 
 // GET /auth/salesforce
-// Only the CivicTax administrator can initiate the central connection.
-authRouter.get('/auth/salesforce', (req: Request, res: Response) => {
+// Only an authenticated CivicTax administrator can connect the service account.
+authRouter.get('/auth/salesforce', async (req: Request, res: Response) => {
   if (!isAdmin(req)) {
     res.status(403).json({ error: 'Admin access required' });
     return;
   }
 
-  if (!config.salesforce.clientId) {
-    res.status(500).json({
-      error: 'Salesforce Client ID is not configured.',
+  try {
+    await beginOAuthFlow(req, res, 'central-salesforce');
+  } catch (err) {
+    const errorType = err instanceof Error ? err.name : 'UnknownError';
+    console.error(`Central Salesforce OAuth initialization failed (${errorType}).`);
+    res.status(503).json({
+      error: 'SALESFORCE_OAUTH_UNAVAILABLE',
+      message: 'Salesforce connection could not be started.',
     });
-    return;
   }
-
-  const state = PKCEUtils.generateState();
-  const codeVerifier = PKCEUtils.generateCodeVerifier();
-  const codeChallenge = PKCEUtils.generateCodeChallenge(codeVerifier);
-
-  req.session.oauthState = state;
-  req.session.codeVerifier = codeVerifier;
-
-  req.session.save((err) => {
-    if (err) {
-      res.status(500).json({
-        error: 'Unable to save OAuth session',
-      });
-      return;
-    }
-
-    const authParams = new URLSearchParams({
-      response_type: 'code',
-      client_id: config.salesforce.clientId,
-      redirect_uri: config.salesforce.redirectUri,
-      code_challenge: codeChallenge,
-      code_challenge_method: 'S256',
-      state,
-      scope: 'api refresh_token web',
-      prompt: 'login consent',
-    });
-
-    const authorizationUrl =
-      `${config.salesforce.loginUrl}/services/oauth2/authorize?${authParams.toString()}`;
-
-    res.redirect(authorizationUrl);
-  });
 });
 
 // GET /auth/salesforce/callback
 authRouter.get(
   '/auth/salesforce/callback',
   async (req: Request, res: Response) => {
-    const { code, state, error, error_description } = req.query;
-
+    const { code, state, error } = req.query;
     const adminPage = `${config.frontendUrl}/admin/salesforce`;
-
-    if (error) {
+    const loginPage = `${config.frontendUrl}/login`;
+    const errorRedirect = (code: string) => {
       res.redirect(
-        `${adminPage}?error=${encodeURIComponent(
-          String(error_description || error)
-        )}`
+        isAdmin(req)
+          ? `${adminPage}?error=${encodeURIComponent(code)}`
+          : `${loginPage}?auth_error=${encodeURIComponent(code)}`
       );
+    };
+
+    if (typeof state !== 'string') {
+      errorRedirect('Invalid_OAuth_State');
       return;
     }
 
-    if (!isAdmin(req)) {
-      res.redirect(
-        `${adminPage}?error=${encodeURIComponent('Admin_Login_Required')}`
-      );
+    let stateRecord: OAuthStateRecord | null;
+    try {
+      stateRecord = await oauthStateStore.consume(state, req.sessionID);
+    } catch (stateError) {
+      const errorType =
+        stateError instanceof Error ? stateError.name : 'UnknownError';
+      console.error(`OAuth state verification failed (${errorType}).`);
+      res.redirect(`${loginPage}?auth_error=Authentication_Unavailable`);
+      return;
+    }
+    if (!stateRecord) {
+      errorRedirect('Invalid_OAuth_State');
+      return;
+    }
+
+    if (error) {
+      errorRedirect('Salesforce_Consent_Failed');
+      return;
+    }
+    if (typeof code !== 'string' || !code) {
+      errorRedirect('Missing_Authorization_Code');
       return;
     }
 
     if (
-      typeof code !== 'string' ||
-      typeof state !== 'string'
+      stateRecord.flow === 'central-salesforce' &&
+      !isAdmin(req)
     ) {
-      res.redirect(`${adminPage}?error=Missing_Code_Or_State`);
-      return;
-    }
-
-    if (!req.session.oauthState || state !== req.session.oauthState) {
-      res.redirect(`${adminPage}?error=Invalid_OAuth_State`);
-      return;
-    }
-
-    const verifier = req.session.codeVerifier;
-
-    if (!verifier) {
-      res.redirect(`${adminPage}?error=Missing_Code_Verifier`);
+      errorRedirect('Admin_Login_Required');
       return;
     }
 
     try {
       const tokenData = await SalesforceClient.exchangeCodeForToken(
         code,
-        verifier
+        stateRecord.codeVerifier
       );
-
-      let username = '';
-      let displayName = '';
-      let orgId = '';
-      let userId = '';
-
-      try {
-        const identity = await SalesforceClient.fetchIdentity(
-          tokenData.id,
-          tokenData.access_token
-        );
-
-        username = identity.username;
-        displayName = identity.display_name;
-        orgId = identity.organization_id;
-        userId = identity.user_id;
-      } catch (identityError) {
-        console.error(
-          'Unable to retrieve Salesforce identity:',
-          identityError
-        );
-
-        const segments = tokenData.id.split('/');
-        orgId = segments[segments.length - 2] || '';
-        userId = segments[segments.length - 1] || '';
-      }
-
-      const sessionData: SalesforceSessionData = {
-        accessToken: tokenData.access_token,
-        refreshToken: tokenData.refresh_token,
-        instanceUrl: tokenData.instance_url,
-        identityUrl: tokenData.id,
-        userId,
-        orgId,
-        username,
-        displayName,
-        connectedAt: new Date().toISOString(),
-        lastActiveAt: new Date().toISOString(),
-      };
-
-      // Save the integration credentials centrally in encrypted Redis storage.
-      await SalesforceConnectionStore.save(sessionData);
-
-      delete req.session.oauthState;
-      delete req.session.codeVerifier;
-
-      req.session.save((saveError) => {
-        if (saveError) {
-          console.error('OAuth session cleanup failed:', saveError);
+      if (stateRecord.flow === 'central-salesforce') {
+        if (!tokenData.refresh_token) {
+          throw new Error('Central Salesforce authorization needs refresh access.');
         }
 
+        const identity = await SalesforceClient.fetchIdentity(
+          tokenData.id,
+          tokenData.access_token,
+          tokenData.instance_url
+        );
+        const now = new Date().toISOString();
+        const sessionData: SalesforceSessionData = {
+          accessToken: tokenData.access_token,
+          refreshToken: tokenData.refresh_token,
+          instanceUrl: tokenData.instance_url,
+          identityUrl: tokenData.id,
+          userId: identity.user_id,
+          orgId: identity.organization_id,
+          username: identity.username,
+          displayName: identity.display_name,
+          connectedAt: now,
+          lastActiveAt: now,
+        };
+        await SalesforceConnectionStore.save(sessionData);
+        delete req.session.oauthStartedAt;
+        await saveSession(req);
         res.redirect(`${adminPage}?status=success`);
-      });
+        return;
+      }
+
+      const civicTaxUser =
+        await SalesforceClient.resolveAuthenticatedCivicTaxUser(tokenData);
+      await regenerateSession(req);
+      const now = Date.now();
+      req.session.civicTaxUser = civicTaxUser;
+      req.session.authProvider = 'salesforce';
+      req.session.authenticatedAt = now;
+      req.session.lastActivityAt = now;
+      await saveSession(req);
+      res.redirect(`${loginPage}?auth=success`);
     } catch (err: unknown) {
-      console.error('Salesforce OAuth Error:', err);
-
-      const message =
-        err instanceof Error ? err.message : 'Authentication_Failed';
-
-      res.redirect(
-        `${adminPage}?error=${encodeURIComponent(message)}`
+      const errorType = err instanceof Error ? err.name : 'UnknownError';
+      console.error(`Salesforce OAuth callback failed (${errorType}).`);
+      errorRedirect(
+        err instanceof Error && err.name === 'SalesforceApiError'
+          ? 'CivicTax_Account_Not_Authorized'
+          : 'Salesforce_Authentication_Failed'
       );
     }
   }
@@ -357,7 +435,8 @@ authRouter.get(
 
       res.json(response);
     } catch (err) {
-      console.error('Salesforce status error:', err);
+      const errorType = err instanceof Error ? err.name : 'UnknownError';
+      console.error(`Salesforce status failed (${errorType}).`);
 
       res.status(503).json({
         connected: false,
@@ -371,6 +450,7 @@ authRouter.get(
 // Disconnect the shared Salesforce integration. CivicTax login remains active.
 authRouter.post(
   '/auth/salesforce/logout',
+  verifyCsrf,
   async (req: Request, res: Response) => {
     if (!isAdmin(req)) {
       res.status(403).json({ error: 'Admin access required' });
@@ -387,7 +467,8 @@ authRouter.post(
         message: 'Central Salesforce connection disconnected.',
       });
     } catch (err) {
-      console.error('Salesforce disconnect error:', err);
+      const errorType = err instanceof Error ? err.name : 'UnknownError';
+      console.error(`Salesforce disconnect failed (${errorType}).`);
 
       res.status(500).json({
         success: false,

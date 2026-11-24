@@ -1,11 +1,29 @@
 // server/src/repositories/ICivicTaxRepository.ts
-import { IProperty, ITaxAssessment, ITaxPayment, IGrievance, IReassessment, IDashboardMetrics } from './types.js';
+import {
+  IProperty,
+  IPropertyDetailsUpdate,
+  ITaxAssessment,
+  ITaxPayment,
+  IGrievance,
+  IReassessment,
+  IDashboardMetrics,
+} from './types.js';
 
 export interface ICivicTaxRepository {
   // Properties
-  listProperties(filter?: { category?: string; zone?: string; status?: string }): Promise<IProperty[]>;
-  getPropertyById(id: string): Promise<IProperty | null>;
+  listProperties(filter?: {
+    category?: string;
+    zone?: string;
+    status?: string;
+    ownerId?: string;
+  }): Promise<IProperty[]>;
+  getPropertyById(id: string, requesterId?: string): Promise<IProperty | null>;
   createProperty(property: Omit<IProperty, 'id' | 'registrationDate'>): Promise<IProperty>;
+  updatePropertyDetails(
+    id: string,
+    updates: IPropertyDetailsUpdate,
+    requesterId?: string
+  ): Promise<IProperty>;
   updatePropertyStatus(id: string, status: IProperty['verificationStatus']): Promise<IProperty>;
 
   // Assessments

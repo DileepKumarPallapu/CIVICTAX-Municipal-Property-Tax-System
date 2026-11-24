@@ -1,5 +1,4 @@
 
-import Redis from 'ioredis';
 import {
   createCipheriv,
   createDecipheriv,
@@ -9,15 +8,10 @@ import {
 
 import { config } from '../config/index.js';
 import type { SalesforceSessionData } from '../types/index.js';
+import { getRedisClient } from './redisClient.js';
 
 const KEY = 'civictax:salesforce:central';
 const TTL_SECONDS = 60 * 60 * 24 * 30;
-
-if (!config.redisUrl) {
-  throw new Error(
-    'REDIS_URL is required for central Salesforce storage.'
-  );
-}
 
 if (!config.sessionSecret || config.sessionSecret.length < 16) {
   throw new Error(
@@ -25,23 +19,20 @@ if (!config.sessionSecret || config.sessionSecret.length < 16) {
   );
 }
 
-// Dedicated Redis connection for central Salesforce credentials.
-const redis = new Redis(config.redisUrl, {
-  maxRetriesPerRequest: 3,
-  enableReadyCheck: true,
-  lazyConnect: false,
-});
-
-redis.on('error', (error: Error) => {
-  console.error('Salesforce Redis connection error:', error.message);
-});
-
 // Derive a 256-bit encryption key from the server secret.
 const encryptionKey = scryptSync(
   config.sessionSecret,
   'civictax-salesforce-v1',
   32
 );
+
+function getConfiguredRedisClient() {
+  const client = getRedisClient();
+  if (!client) {
+    throw new Error('Redis is not configured for Salesforce credential storage.');
+  }
+  return client;
+}
 
 // ============================================================
 // ENCRYPTION
@@ -133,17 +124,12 @@ export const SalesforceConnectionStore = {
 
     const encryptedData = encrypt(data);
 
-    await redis.set(
-      KEY,
-      encryptedData,
-      'EX',
-      TTL_SECONDS
-    );
+    await getConfiguredRedisClient().set(KEY, encryptedData, TTL_SECONDS);
   },
 
   // Retrieve and decrypt the central Salesforce connection.
   async get(): Promise<SalesforceSessionData | null> {
-    const encryptedData = await redis.get(KEY);
+    const encryptedData = await getConfiguredRedisClient().get(KEY);
 
     if (!encryptedData) {
       return null;
@@ -164,11 +150,11 @@ export const SalesforceConnectionStore = {
 
   // Remove the central Salesforce connection.
   async disconnect(): Promise<void> {
-    await redis.del(KEY);
+    await getConfiguredRedisClient().del(KEY);
   },
 
   // Check whether a central connection exists.
   async isConnected(): Promise<boolean> {
-    return (await redis.exists(KEY)) === 1;
+    return getConfiguredRedisClient().exists(KEY);
   },
 };

@@ -175,7 +175,8 @@ describe('CivicTax Server Repository & Business Rules Test Suite', () => {
         (l: any) => l.route && l.route.path === '/api/auth/login' && l.route.methods.post
       );
       expect(loginLayer).toBeTruthy();
-      loginLayer.route.stack[0].handle(citizenReq, citizenRes);
+      loginLayer.route.stack[1].handle(citizenReq, citizenRes);
+      await new Promise((resolve) => setImmediate(resolve));
 
       expect(statusCode).toBe(200);
       expect(jsonResponse.success).toBe(true);
@@ -186,9 +187,90 @@ describe('CivicTax Server Repository & Business Rules Test Suite', () => {
         body: { email: 'citizen@civictax.demo', password: 'WrongPassword' },
         session: createMockSession(),
       };
-      loginLayer.route.stack[0].handle(invalidReq, citizenRes);
+      loginLayer.route.stack[1].handle(invalidReq, citizenRes);
       expect(statusCode).toBe(401);
       expect(jsonResponse.success).toBe(false);
+    });
+
+    it('disables demo credentials when production mode is enabled', async () => {
+      const { authRouter } = await import('../routes/authRoutes.js');
+      const { config } = await import('../config/index.js');
+      const wasProduction = config.isProduction;
+      config.isProduction = true;
+
+      let statusCode = 200;
+      let jsonResponse: any = null;
+      const loginLayer = authRouter.stack.find(
+        (l: any) =>
+          l.route &&
+          l.route.path === '/api/auth/login' &&
+          l.route.methods.post
+      );
+      const res: any = {
+        status(code: number) {
+          statusCode = code;
+          return this;
+        },
+        json(data: any) {
+          jsonResponse = data;
+        },
+      };
+
+      try {
+        loginLayer.route.stack[1].handle(
+          {
+            body: {
+              email: 'admin@civictax.demo',
+              password: 'Admin@123',
+            },
+          },
+          res
+        );
+      } finally {
+        config.isProduction = wasProduction;
+      }
+
+      expect(statusCode).toBe(503);
+      expect(jsonResponse.error).toBe('AUTHENTICATION_NOT_CONFIGURED');
+    });
+
+    it('does not trust previously issued demo sessions in production', async () => {
+      const { authRouter } = await import('../routes/authRoutes.js');
+      const { config } = await import('../config/index.js');
+      const wasProduction = config.isProduction;
+      config.isProduction = true;
+
+      let responseData: any = null;
+      const meLayer = authRouter.stack.find(
+        (l: any) =>
+          l.route && l.route.path === '/api/auth/me' && l.route.methods.get
+      );
+
+      try {
+        meLayer.route.stack[0].handle(
+          {
+            session: {
+              civicTaxUser: {
+                id: 'usr-admin-01',
+                email: 'admin@civictax.demo',
+                role: 'ADMIN',
+              },
+            },
+          },
+          {
+            status() {
+              return this;
+            },
+            json(data: any) {
+              responseData = data;
+            },
+          }
+        );
+      } finally {
+        config.isProduction = wasProduction;
+      }
+
+      expect(responseData.authenticated).toBe(false);
     });
 
     it('blocks citizen sessions from calling officer/admin proxy endpoints (403 Forbidden)', async () => {
@@ -208,6 +290,7 @@ describe('CivicTax Server Repository & Business Rules Test Suite', () => {
         session: {
           salesforceSession: { accessToken: 'mock-sf-token', instanceUrl: 'https://test.my.salesforce.com' },
           civicTaxUser: { id: 'usr-cit-1', email: 'citizen@civictax.demo', role: 'CITIZEN', name: 'Citizen User' },
+          authProvider: 'demo',
         },
       };
 
@@ -297,7 +380,8 @@ describe('CivicTax Server Repository & Business Rules Test Suite', () => {
       const loginLayer = authRouter.stack.find(
         (l: any) => l.route && l.route.path === '/api/auth/login' && l.route.methods.post
       );
-      loginLayer.route.stack[0].handle(loginReq, loginRes);
+      loginLayer.route.stack[1].handle(loginReq, loginRes);
+      await new Promise((resolve) => setImmediate(resolve));
       expect(loginCode).toBe(200);
       expect(loginData.success).toBe(true);
       expect(sessionStore.civicTaxUser).toBeTruthy();
@@ -329,6 +413,8 @@ describe('CivicTax Server Repository & Business Rules Test Suite', () => {
 
       // Request 3: Logout
       const logoutReq: any = {
+        method: 'POST',
+        headers: { 'x-civictax-csrf': '1' },
         session: sessionStore,
       };
       let logoutCode = 200;
@@ -347,7 +433,9 @@ describe('CivicTax Server Repository & Business Rules Test Suite', () => {
       const logoutLayer = authRouter.stack.find(
         (l: any) => l.route && l.route.path === '/api/auth/logout' && l.route.methods.post
       );
-      logoutLayer.route.stack[0].handle(logoutReq, logoutRes);
+      logoutLayer.route.stack[0].handle(logoutReq, logoutRes, () => {
+        logoutLayer.route.stack[1].handle(logoutReq, logoutRes);
+      });
       expect(logoutCode).toBe(200);
       expect(logoutData.success).toBe(true);
       expect(sessionStore.civicTaxUser).toBeUndefined();

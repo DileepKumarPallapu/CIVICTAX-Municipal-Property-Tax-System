@@ -70,7 +70,9 @@ Under **Environment Variables**, add the following keys:
 | `NODE_ENV` | `production` | Enables production cookie security (`secure: true`, `sameSite: 'none'`). |
 | `PORT` | `3001` | Server port (used for local fallback). |
 | `SESSION_SECRET` | *(Generate a 32+ character random string)* | Secret for signing HTTP-only session cookies. |
-| `REDIS_URL` | `rediss://default:...@...:6379` | **Essential for Production**: Upstash Redis, Vercel KV, or Redis Cloud connection URI for durable multi-instance serverless session clustering. Local dev can omit to use memory store. |
+| `UPSTASH_REDIS_REST_URL` | `https://<database>.upstash.io` | **Recommended for Upstash**: REST endpoint for persistent sessions and encrypted Salesforce connection storage. |
+| `UPSTASH_REDIS_REST_TOKEN` | *(Set in the hosting dashboard; never commit it)* | Bearer token paired with `UPSTASH_REDIS_REST_URL`. |
+| `REDIS_URL` | `rediss://default:...@...:6379` | Alternative node-redis TCP connection. Use either this or both Upstash REST variables. Local development may omit Redis and use memory sessions. |
 | `FRONTEND_URL` | `http://localhost:5173` *(Update in Phase C)* | Allowed origin for CORS & OAuth redirects. |
 | `SF_LOGIN_URL` | `https://login.salesforce.com` | Target Salesforce login endpoint. |
 | `SF_CLIENT_ID` | `YOUR_SALESFORCE_CONSUMER_KEY` | External Client App Consumer Key from Salesforce. |

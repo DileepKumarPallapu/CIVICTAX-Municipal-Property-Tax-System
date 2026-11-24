@@ -83,7 +83,12 @@ export const AppRoutes: React.FC = () => {
         <Route path="/contact" element={<ContactPage />} />
         <Route path="/transparency" element={<PublicTransparencyPage />} />
         <Route path="/login" element={<LoginPage />} />
-        <Route path="/demo-registration" element={<DemoRegistrationPage />} />
+        {import.meta.env.DEV && (
+          <Route
+            path="/demo-registration"
+            element={<DemoRegistrationPage />}
+          />
+        )}
         <Route path="/verify-receipt" element={<ReceiptVerificationPage />} />
         <Route path="/verify-receipt/:receiptId" element={<ReceiptVerificationPage />} />
       </Route>

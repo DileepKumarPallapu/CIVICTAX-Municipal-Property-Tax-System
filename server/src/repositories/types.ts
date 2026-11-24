@@ -16,6 +16,20 @@ export interface IProperty {
   registrationDate: string;
 }
 
+export type IPropertyDetailsUpdate = Partial<
+  Pick<
+    IProperty,
+    | 'address'
+    | 'category'
+    | 'builtUpArea'
+    | 'zone'
+    | 'documentReference'
+    | 'latitude'
+    | 'longitude'
+    | 'constructionYear'
+  >
+>;
+
 export interface ITaxAssessment {
   id: string;
   assessmentNumber: string;

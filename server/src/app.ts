@@ -3,10 +3,22 @@ import express from 'express';
 import session from 'express-session';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
-import { RedisStore } from 'connect-redis';
-import { createClient } from 'redis';
 
-import { config } from './config/index.js';
+import {
+  config,
+  getAllowedFrontendOrigins,
+} from './config/index.js';
+import {
+  getRedisClient,
+  RedisUnavailableError,
+  reportRedisError,
+} from './services/redisClient.js';
+import { RedisSessionStore } from './services/redisSessionStore.js';
+import {
+  enforceSessionLifetime,
+  SESSION_COOKIE_NAME,
+  SESSION_IDLE_TIMEOUT_MS,
+} from './middleware/auth.js';
 import { authRouter } from './routes/authRoutes.js';
 import { salesforceApiRouter } from './routes/salesforceRoutes.js';
 import { municipalApiRouter } from './modules/municipalRoutes.js';
@@ -15,14 +27,8 @@ export const app = express();
 
 app.set('trust proxy', 1);
 
-const isProduction =
-  config.nodeEnv === 'production' || Boolean(process.env.VERCEL);
-
-const allowedOrigins = [
-  config.frontendUrl,
-  'http://localhost:5173',
-  'http://127.0.0.1:5173',
-].filter(Boolean);
+const isProduction = config.isProduction;
+const allowedOrigins = getAllowedFrontendOrigins(config);
 
 app.use(
   cors({
@@ -31,12 +37,7 @@ app.use(
 
       const isAllowed = allowedOrigins.includes(origin);
 
-      const isVercelPreview =
-        origin.endsWith('.vercel.app') &&
-        (config.frontendUrl.includes('vercel.app') ||
-          config.nodeEnv === 'production');
-
-      if (isAllowed || isVercelPreview) {
+      if (isAllowed) {
         return callback(null, true);
       }
 
@@ -56,83 +57,35 @@ app.use(
 app.use(express.json());
 app.use(cookieParser());
 
-// Redis session configuration
-let sessionStore: session.Store | undefined;
-let redisReady: Promise<void> | undefined;
-let redisConnectionError: unknown;
+const redisClient = getRedisClient(isProduction);
 
-if (config.redisUrl) {
-  const redisClient = createClient({
-    url: config.redisUrl,
-    socket: {
-      reconnectStrategy: (retries) =>
-        Math.min(retries * 500, 5000),
-    },
-  });
-
-  redisClient.on('error', (error) => {
-    console.error('Redis session client error:', error.message);
-  });
-
-  redisClient.on('ready', () => {
-    console.log('CivicTax Redis session client ready');
-  });
-
-  redisReady = redisClient
-    .connect()
-    .then(() => {
-      console.log('CivicTax Redis session connection established');
-    })
-    .catch((error: unknown) => {
-      redisConnectionError = error;
-      console.error('Redis initial connection failed:', error);
-    });
-
-  sessionStore = new RedisStore({
-    client: redisClient,
-    prefix: 'civictax:sess:',
-    ttl: 8 * 60 * 60,
-  });
-} else if (isProduction) {
-  throw new Error(
-    'REDIS_URL is required in production. Configure Redis before starting CivicTax.'
-  );
-} else {
+if (!redisClient) {
   console.warn(
-    'REDIS_URL is not configured. Using the Express in-memory session store for local development.'
+    'Redis is not configured. Using the Express in-memory session store for local development.'
   );
-}
-
-// Ensure Redis is ready before processing session requests.
-if (redisReady) {
-  app.use(async (_req, _res, next) => {
-    await redisReady;
-
-    if (redisConnectionError) {
-      return next(redisConnectionError);
-    }
-
-    next();
-  });
 }
 
 // Express session middleware
 app.use(
   session({
-    name: 'civictax.sid',
+    name: SESSION_COOKIE_NAME,
     secret: config.sessionSecret,
-    store: sessionStore,
+    store: redisClient
+      ? new RedisSessionStore(redisClient, 'civictax:sess:', 8 * 60 * 60)
+      : undefined,
     resave: false,
     saveUninitialized: false,
+    rolling: true,
     cookie: {
       httpOnly: true,
       secure: isProduction,
       sameSite: isProduction ? 'none' : 'lax',
-      maxAge: 8 * 60 * 60 * 1000,
+      maxAge: SESSION_IDLE_TIMEOUT_MS,
       path: '/',
     },
   })
 );
+app.use(enforceSessionLifetime);
 
 // Application routers
 app.use(authRouter);
@@ -152,10 +105,24 @@ app.get('/', (_req, res) => {
 });
 
 // Health endpoint
-app.get('/health', (_req, res) => {
+app.get('/health', async (_req, res) => {
+  if (redisClient) {
+    try {
+      await redisClient.ping();
+    } catch (error) {
+      reportRedisError('health check', error);
+      res.status(503).json({
+        status: 'UNAVAILABLE',
+        service: 'CivicTax Salesforce Gateway',
+      });
+      return;
+    }
+  }
+
   res.json({
     status: 'HEALTHY',
     service: 'CivicTax Salesforce Gateway',
+    redis: redisClient ? 'connected' : 'development-memory',
     timestamp: new Date().toISOString(),
   });
 });
@@ -168,7 +135,17 @@ app.use(
     res: express.Response,
     next: express.NextFunction
   ) => {
-    console.error('Unhandled server error:', err);
+    if (err instanceof RedisUnavailableError) {
+      console.error('Redis-backed request failed (RedisUnavailableError).');
+      return res.status(503).json({
+        error: 'SERVICE_UNAVAILABLE',
+        message: 'A required storage service is unavailable',
+      });
+    }
+
+    const errorType =
+      err instanceof Error ? err.name : 'UnknownError';
+    console.error(`Unhandled server error (${errorType}).`);
 
     if (res.headersSent) {
       return next(err);

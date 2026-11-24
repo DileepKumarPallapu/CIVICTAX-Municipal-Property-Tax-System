@@ -1,73 +1,44 @@
 
 import { Router, Request, Response, NextFunction } from 'express';
-import { SalesforceClient } from '../services/salesforceClient.js';
+import {
+  SalesforceApiError,
+  SalesforceClient,
+} from '../services/salesforceClient.js';
 import { SalesforceConnectionStore } from '../services/salesforceConnectionStore.js';
 import { SalesforceSessionData } from '../types/index.js';
-import { config } from '../config/index.js';
+import { verifyCsrf } from '../middleware/csrf.js';
+import { getAuthenticatedUser } from '../middleware/auth.js';
 
 export const salesforceApiRouter = Router();
 
-// ============================================================
-// 1. CSRF PROTECTION
-// ============================================================
+function logError(context: string, error: unknown): void {
+  const errorType = error instanceof Error ? error.name : 'UnknownError';
+  console.error(`${context} (${errorType}).`);
+}
 
-const verifyCsrf = (
-  req: Request,
-  res: Response,
-  next: NextFunction
-) => {
-  if (['POST', 'PATCH', 'PUT', 'DELETE'].includes(req.method)) {
-    const origin = req.headers.origin;
-
-    const customHeader =
-      req.headers['x-requested-with'] ||
-      req.headers['x-civictax-csrf'];
-
-    const allowedOrigins = [
-      config.frontendUrl,
-      'http://localhost:5173',
-      'http://127.0.0.1:5173',
-    ].filter(Boolean);
-
-    if (origin) {
-      let originUrl: URL;
-
-      try {
-        originUrl = new URL(origin);
-      } catch {
-        res.status(403).json({
-          error: 'CSRF_VALIDATION_FAILED',
-          message: 'Invalid request origin.',
-        });
-        return;
-      }
-
-      const matches = allowedOrigins.some((allowed) => {
-        try {
-          return new URL(allowed).origin === originUrl.origin;
-        } catch {
-          return false;
-        }
-      });
-
-      if (!matches) {
-        res.status(403).json({
-          error: 'CSRF_VALIDATION_FAILED',
-          message: 'Cross-origin state-changing requests are prohibited.',
-        });
-        return;
-      }
-    } else if (!customHeader) {
-      res.status(403).json({
-        error: 'CSRF_VALIDATION_FAILED',
-        message: 'A valid request origin or CSRF header is required.',
-      });
-      return;
-    }
+function getPublicProxyError(
+  error: unknown,
+  fallback: string
+): { status: number; message: string } {
+  if (!(error instanceof SalesforceApiError)) {
+    return { status: 502, message: fallback };
   }
 
-  next();
-};
+  if (error.statusCode === 404) {
+    return { status: 404, message: 'The requested record was not found.' };
+  }
+  if (error.statusCode === 409) {
+    return { status: 409, message: 'The requested record already exists.' };
+  }
+  if (error.statusCode === 403) {
+    return { status: 403, message: 'The authenticated user is not authorized.' };
+  }
+  if (error.statusCode === 400) {
+    return { status: 400, message: 'The request could not be processed.' };
+  }
+
+  return { status: 502, message: fallback };
+}
 
 // ============================================================
 // 2. CENTRAL SALESFORCE CONNECTION MIDDLEWARE
@@ -100,7 +71,7 @@ const requireSalesforceSession = async (
 
     next();
   } catch (err) {
-    console.error('Central Salesforce connection error:', err);
+    logError('Central Salesforce connection error', err);
 
     res.status(503).json({
       error: 'SALESFORCE_CONNECTION_UNAVAILABLE',
@@ -118,7 +89,7 @@ const requireCivicTaxUser = (
   res: Response,
   next: NextFunction
 ) => {
-  const user = req.session.civicTaxUser;
+  const user = getAuthenticatedUser(req);
 
   if (!user) {
     res.status(401).json({
@@ -144,7 +115,7 @@ const requireRole = (
     res: Response,
     next: NextFunction
   ) => {
-    const user = req.session.civicTaxUser;
+    const user = getAuthenticatedUser(req);
 
     if (!user || !allowedRoles.includes(user.role)) {
       res.status(403).json({
@@ -203,7 +174,8 @@ salesforceApiRouter.get(
 
       const identity = await SalesforceClient.fetchIdentity(
         session.identityUrl,
-        session.accessToken
+        session.accessToken,
+        session.instanceUrl
       );
 
       await updateSalesforceActivity(res);
@@ -217,13 +189,13 @@ salesforceApiRouter.get(
         displayName: identity.display_name,
         timestamp: new Date().toISOString(),
       });
-    } catch (err: any) {
-      console.error('Salesforce verification failed:', err);
+    } catch (err: unknown) {
+      logError('Salesforce verification failed', err);
 
       res.status(502).json({
         success: false,
         error: 'SALESFORCE_VERIFICATION_FAILED',
-        message: err.message || 'Unable to verify Salesforce connection.',
+        message: 'Unable to verify Salesforce connection.',
       });
     }
   }
@@ -253,18 +225,23 @@ salesforceApiRouter.patch(
         session,
         endpointPath,
         'PATCH',
-        req.body
+        req.body,
+        req.session.civicTaxUser!.id
       );
 
       await updateSalesforceActivity(res);
 
       res.json(data);
-    } catch (err: any) {
-      console.error('Property Apex proxy error:', err);
+    } catch (err: unknown) {
+      logError('Property Apex proxy error', err);
+      const publicError = getPublicProxyError(
+        err,
+        'Property verification failed.'
+      );
 
-      res.status(502).json({
+      res.status(publicError.status).json({
         error: 'APEX_REST_PROXY_ERROR',
-        message: err.message || 'Property verification failed.',
+        message: publicError.message,
       });
     }
   }
@@ -292,18 +269,24 @@ salesforceApiRouter.get(
       const data = await SalesforceClient.callApexRest(
         session,
         endpointPath,
-        'GET'
+        'GET',
+        undefined,
+        req.session.civicTaxUser!.id
       );
 
       await updateSalesforceActivity(res);
 
       res.json(data);
-    } catch (err: any) {
-      console.error('Dashboard Apex proxy error:', err);
+    } catch (err: unknown) {
+      logError('Dashboard Apex proxy error', err);
+      const publicError = getPublicProxyError(
+        err,
+        'Dashboard request failed.'
+      );
 
-      res.status(502).json({
+      res.status(publicError.status).json({
         error: 'APEX_REST_PROXY_ERROR',
-        message: err.message || 'Dashboard request failed.',
+        message: publicError.message,
       });
     }
   }
@@ -333,18 +316,23 @@ salesforceApiRouter.post(
         session,
         endpointPath,
         'POST',
-        req.body
+        req.body,
+        req.session.civicTaxUser!.id
       );
 
       await updateSalesforceActivity(res);
 
       res.json(data);
-    } catch (err: any) {
-      console.error('Assessment Apex proxy error:', err);
+    } catch (err: unknown) {
+      logError('Assessment Apex proxy error', err);
+      const publicError = getPublicProxyError(
+        err,
+        'Assessment request failed.'
+      );
 
-      res.status(502).json({
+      res.status(publicError.status).json({
         error: 'APEX_REST_PROXY_ERROR',
-        message: err.message || 'Assessment request failed.',
+        message: publicError.message,
       });
     }
   }
@@ -432,25 +420,23 @@ salesforceApiRouter.all(
         session,
         endpointPath,
         method,
-        body
+        body,
+        user.id
       );
 
       await updateSalesforceActivity(res);
 
       res.json(data);
-    } catch (err: any) {
-      console.error('Generic Apex proxy error:', err);
-
-      const sanitizedMessage = String(
-        err?.message || 'Apex Proxy Error'
-      ).replace(
-        /Bearer\s+[A-Za-z0-9._-]+/gi,
-        'Bearer [REDACTED]'
+    } catch (err: unknown) {
+      logError('Generic Apex proxy error', err);
+      const publicError = getPublicProxyError(
+        err,
+        'Salesforce request failed.'
       );
 
-      res.status(502).json({
+      res.status(publicError.status).json({
         error: 'APEX_REST_PROXY_ERROR',
-        message: sanitizedMessage,
+        message: publicError.message,
       });
     }
   }

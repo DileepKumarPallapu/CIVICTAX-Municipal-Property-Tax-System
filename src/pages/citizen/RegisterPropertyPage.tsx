@@ -13,9 +13,6 @@ import { MunicipalZone, PropertyCategory } from '../../types';
 // Validation Schema using Zod
 const currentYear = new Date().getFullYear();
 const propertySchema = z.object({
-  ownerName: z.string().min(3, 'Owner name must be at least 3 characters'),
-  ownerEmail: z.string().email('Please enter a valid email address'),
-  ownerPhone: z.string().min(10, 'Please enter a valid 10-digit mobile number'),
   address: z.string().min(10, 'Full address must be at least 10 characters'),
   category: z.enum(['RESIDENTIAL', 'COMMERCIAL', 'INDUSTRIAL']),
   zoneId: z.string().min(1, 'Please select a municipal zone'),
@@ -28,8 +25,6 @@ const propertySchema = z.object({
   documentReference: z
     .string()
     .min(5, 'Ownership document registration reference is required (e.g. DOC-MH-2024-XXXX)'),
-  contactDetails: z.string().optional(),
-  description: z.string().optional(),
 });
 
 type PropertyFormData = z.infer<typeof propertySchema>;
@@ -52,18 +47,13 @@ export const RegisterPropertyPage: React.FC = () => {
     formState: { errors },
   } = useForm<PropertyFormData>({
     resolver: zodResolver(propertySchema),
-     defaultValues: {
-      ownerName: '',
-      ownerEmail: '',
-      ownerPhone: '',
+    defaultValues: {
       category: undefined,
       zoneId: '',
       builtUpArea: undefined,
       constructionYear: undefined,
       address: '',
       documentReference: '',
-      contactDetails: '',
-      description: '',
     },
   });
 
@@ -77,9 +67,9 @@ export const RegisterPropertyPage: React.FC = () => {
 
       const newProp = await services.propertyService.createProperty({
         ownerId: currentUser.id,
-        ownerName: data.ownerName,
-        ownerEmail: data.ownerEmail,
-        ownerPhone: data.ownerPhone,
+        ownerName: currentUser.name,
+        ownerEmail: currentUser.email,
+        ownerPhone: currentUser.phone,
         address: data.address,
         category: data.category as PropertyCategory,
         zoneId: data.zoneId,
@@ -87,8 +77,8 @@ export const RegisterPropertyPage: React.FC = () => {
         builtUpArea: data.builtUpArea,
         constructionYear: data.constructionYear,
         documentReference: data.documentReference,
-        contactDetails: data.contactDetails || '',
-        description: data.description || '',
+        contactDetails: '',
+        description: '',
       });
 
       success(
@@ -136,48 +126,16 @@ export const RegisterPropertyPage: React.FC = () => {
             <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3">
               1. Title & Ownership Identification
             </h4>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Property Owner Name *
-                </label>
-                <input
-                  type="text"
-                  {...register('ownerName')}
-                  className="w-full px-3.5 py-2.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-slate-900 dark:text-white"
-                />
-                {errors.ownerName && (
-                  <p className="mt-1 text-[11px] text-rose-500">{errors.ownerName.message}</p>
-                )}
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Email Address *
-                </label>
-                <input
-                  type="email"
-                  {...register('ownerEmail')}
-                  className="w-full px-3.5 py-2.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-slate-900 dark:text-white"
-                />
-                {errors.ownerEmail && (
-                  <p className="mt-1 text-[11px] text-rose-500">{errors.ownerEmail.message}</p>
-                )}
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Mobile Number *
-                </label>
-                <input
-                  type="tel"
-                  {...register('ownerPhone')}
-                  className="w-full px-3.5 py-2.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-slate-900 dark:text-white"
-                />
-                {errors.ownerPhone && (
-                  <p className="mt-1 text-[11px] text-rose-500">{errors.ownerPhone.message}</p>
-                )}
-              </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-700 dark:bg-slate-800">
+              <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                {currentUser?.name}
+              </p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {currentUser?.email}
+              </p>
+              <p className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
+                The property will be linked to the Salesforce Contact associated with your authenticated CivicTax account.
+              </p>
             </div>
           </div>
 
@@ -291,17 +249,6 @@ export const RegisterPropertyPage: React.FC = () => {
                 )}
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Additional Remarks / Architectural Details (Optional)
-                </label>
-                <textarea
-                  rows={2}
-                  {...register('description')}
-                  placeholder="e.g. 2-story independent bungalow with rooftop solar panels..."
-                  className="w-full px-3.5 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-slate-900 dark:text-white"
-                ></textarea>
-              </div>
             </div>
           </div>
 

@@ -24,8 +24,12 @@ export const MyPropertiesPage: React.FC = () => {
   // Selected property for view/edit modal
   const [selectedProperty, setSelectedProperty] = useState<Property | null>(null);
   const [isEditing, setIsEditing] = useState(false);
-  const [editContact, setEditContact] = useState('');
-  const [editDesc, setEditDesc] = useState('');
+  const [editAddress, setEditAddress] = useState('');
+  const [editCategory, setEditCategory] = useState<PropertyCategory>('RESIDENTIAL');
+  const [editArea, setEditArea] = useState('');
+  const [editZone, setEditZone] = useState('');
+  const [editConstructionYear, setEditConstructionYear] = useState('');
+  const [editDocumentReference, setEditDocumentReference] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
   const loadProperties = useCallback(async () => {
@@ -76,8 +80,12 @@ export const MyPropertiesPage: React.FC = () => {
 
   const handleOpenDetails = (prop: Property) => {
     setSelectedProperty(prop);
-    setEditContact(prop.contactDetails);
-    setEditDesc(prop.description);
+    setEditAddress(prop.address);
+    setEditCategory(prop.category);
+    setEditArea(String(prop.builtUpArea));
+    setEditZone(prop.zoneName || prop.zoneId);
+    setEditConstructionYear(String(prop.constructionYear));
+    setEditDocumentReference(prop.documentReference);
     setIsEditing(false);
   };
 
@@ -86,10 +94,15 @@ export const MyPropertiesPage: React.FC = () => {
     setIsSaving(true);
     try {
       const updated = await services.propertyService.updateProperty(selectedProperty.id, {
-        contactDetails: editContact,
-        description: editDesc,
+        address: editAddress,
+        category: editCategory,
+        builtUpArea: Number(editArea),
+        zoneId: editZone,
+        zoneName: editZone,
+        constructionYear: Number(editConstructionYear),
+        documentReference: editDocumentReference,
       });
-      success('Property Updated', `Contact info for ${updated.propertyNumber} saved.`);
+      success('Property Updated', `Property ${updated.propertyNumber} was saved.`);
       setProperties((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
       setSelectedProperty(updated);
       setIsEditing(false);
@@ -322,8 +335,8 @@ export const MyPropertiesPage: React.FC = () => {
               {/* Editable Fields */}
               <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="font-bold text-slate-900 dark:text-white">Contact & Description</span>
-                  {!isEditing && (
+                  <span className="font-bold text-slate-900 dark:text-white">Property Details</span>
+                  {!isEditing && selectedProperty.verificationStatus !== 'VERIFIED' && (
                     <button
                       onClick={() => setIsEditing(true)}
                       className="text-xs text-blue-600 font-bold flex items-center gap-1 hover:underline"
@@ -337,25 +350,67 @@ export const MyPropertiesPage: React.FC = () => {
                   <div className="space-y-3">
                     <div>
                       <label className="block text-[11px] font-semibold text-slate-500 mb-1">
-                        Contact Details
+                        Property Address
                       </label>
                       <input
                         type="text"
-                        value={editContact}
-                        onChange={(e) => setEditContact(e.target.value)}
+                        value={editAddress}
+                        onChange={(e) => setEditAddress(e.target.value)}
                         className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl"
                       />
                     </div>
-                    <div>
-                      <label className="block text-[11px] font-semibold text-slate-500 mb-1">
-                        Description / Remarks
+                    <div className="grid grid-cols-2 gap-3">
+                      <label className="block text-[11px] font-semibold text-slate-500">
+                        Category
+                        <select
+                          value={editCategory}
+                          onChange={(e) => setEditCategory(e.target.value as PropertyCategory)}
+                          className="mt-1 w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl"
+                        >
+                          <option value="RESIDENTIAL">Residential</option>
+                          <option value="COMMERCIAL">Commercial</option>
+                          <option value="INDUSTRIAL">Industrial</option>
+                        </select>
                       </label>
-                      <textarea
-                        rows={2}
-                        value={editDesc}
-                        onChange={(e) => setEditDesc(e.target.value)}
-                        className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl"
-                      />
+                      <label className="block text-[11px] font-semibold text-slate-500">
+                        Built-up Area (sq.ft)
+                        <input
+                          type="number"
+                          min="1"
+                          value={editArea}
+                          onChange={(e) => setEditArea(e.target.value)}
+                          className="mt-1 w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl"
+                        />
+                      </label>
+                      <label className="block text-[11px] font-semibold text-slate-500">
+                        Municipal Zone
+                        <input
+                          type="text"
+                          value={editZone}
+                          onChange={(e) => setEditZone(e.target.value)}
+                          className="mt-1 w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl"
+                        />
+                      </label>
+                      <label className="block text-[11px] font-semibold text-slate-500">
+                        Construction Year
+                        <input
+                          type="number"
+                          min="1900"
+                          max={new Date().getFullYear()}
+                          value={editConstructionYear}
+                          onChange={(e) => setEditConstructionYear(e.target.value)}
+                          className="mt-1 w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl"
+                        />
+                      </label>
+                      <label className="col-span-2 block text-[11px] font-semibold text-slate-500">
+                        Ownership Document Reference
+                        <input
+                          type="text"
+                          value={editDocumentReference}
+                          onChange={(e) => setEditDocumentReference(e.target.value)}
+                          className="mt-1 w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl"
+                        />
+                      </label>
                     </div>
                     <div className="flex justify-end gap-2">
                       <button
@@ -375,8 +430,11 @@ export const MyPropertiesPage: React.FC = () => {
                   </div>
                 ) : (
                   <div className="space-y-1 text-xs text-slate-600 dark:text-slate-300">
-                    <p><strong>Contact:</strong> {selectedProperty.contactDetails || '—'}</p>
-                    <p><strong>Notes:</strong> {selectedProperty.description || '—'}</p>
+                    <p>
+                      {selectedProperty.verificationStatus === 'VERIFIED'
+                        ? 'Verified properties cannot be edited directly. Submit a reassessment request.'
+                        : 'Property details can be edited until verification is complete.'}
+                    </p>
                   </div>
                 )}
               </div>
