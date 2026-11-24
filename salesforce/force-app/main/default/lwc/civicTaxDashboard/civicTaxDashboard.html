@@ -1,26 +1,43 @@
 <template>
-    <lightning-card title="CivicTax Municipal Operations Dashboard" icon-name="custom:custom63">
-        <div class="slds-p-around_medium">
-            <div class="slds-grid slds-gutters">
-                <div class="slds-col slds-size_1-of-3">
-                    <div class="slds-box slds-theme_default">
-                        <p class="slds-text-title_caps">Total Properties</p>
-                        <h2 class="slds-text-heading_large slds-text-color_default">{totalProperties}</h2>
-                    </div>
-                </div>
-                <div class="slds-col slds-size_1-of-3">
-                    <div class="slds-box slds-theme_default">
-                        <p class="slds-text-title_caps">Verified Properties</p>
-                        <h2 class="slds-text-heading_large slds-text-color_success">{verifiedProperties}</h2>
-                    </div>
-                </div>
-                <div class="slds-col slds-size_1-of-3">
-                    <div class="slds-box slds-theme_default">
-                        <p class="slds-text-title_caps">Collection Efficiency</p>
-                        <h2 class="slds-text-heading_large slds-text-color_error">{collectionEfficiency}%</h2>
-                    </div>
-                </div>
-            </div>
+  <lightning-card
+    title="CivicTax Municipal Operations Dashboard"
+    icon-name="custom:custom63"
+  >
+    <div class="slds-p-around_medium">
+      <template lwc:if={hasError}>
+        <div
+          class="slds-notify slds-notify_alert slds-alert_error"
+          role="alert"
+        >
+          Dashboard metrics are unavailable.
         </div>
-    </lightning-card>
+      </template>
+      <div class="slds-grid slds-gutters">
+        <div class="slds-col slds-size_1-of-3">
+          <div class="slds-box slds-theme_default">
+            <p class="slds-text-title_caps">Total Properties</p>
+            <h2 class="slds-text-heading_large slds-text-color_default">
+              {totalProperties}
+            </h2>
+          </div>
+        </div>
+        <div class="slds-col slds-size_1-of-3">
+          <div class="slds-box slds-theme_default">
+            <p class="slds-text-title_caps">Verified Properties</p>
+            <h2 class="slds-text-heading_large slds-text-color_success">
+              {verifiedProperties}
+            </h2>
+          </div>
+        </div>
+        <div class="slds-col slds-size_1-of-3">
+          <div class="slds-box slds-theme_default">
+            <p class="slds-text-title_caps">Collection Efficiency</p>
+            <h2 class="slds-text-heading_large slds-text-color_error">
+              {collectionEfficiency}%
+            </h2>
+          </div>
+        </div>
+      </div>
+    </div>
+  </lightning-card>
 </template>

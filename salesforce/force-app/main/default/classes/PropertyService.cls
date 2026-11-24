@@ -52,6 +52,15 @@ public with sharing class PropertyService {
             Registration_Date__c = System.now()
         );
 
+        // For CivicTax citizen sessions, bind the record to the mapped Contact.
+        // OwnerId is the Salesforce record owner and is not a citizen identity.
+        if (String.isNotBlank(CivicTaxSecurityService.getRequestIdentity()) &&
+            !CivicTaxSecurityService.isOfficerOrAdmin()) {
+            Id citizenContactId = CivicTaxSecurityService.getCurrentCitizenContactId();
+            prop.Owner__c = citizenContactId;
+            prop.Property_Owner__c = citizenContactId;
+        }
+
         insert prop;
         return prop;
     }
@@ -62,36 +71,25 @@ public with sharing class PropertyService {
             throw new PropertyException('Property identifier cannot be blank.');
         }
 
-        Boolean isSalesforceId = false;
-        try {
-            Id checkId = (Id) identifier;
-            isSalesforceId = true;
-        } catch (Exception ex) {
-            isSalesforceId = false;
+        // Identify the record and enforce ownership before attempting a sharing-scoped
+        // business-data query. The probe exposes only ownership metadata.
+        Property__c ownership = CivicTaxPropertyAccessProbe.findByIdentifier(identifier);
+        if (ownership == null) {
+            throw new PropertyException('Property record not found for: ' + identifier);
         }
+        CivicTaxSecurityService.requireCanAccessProperty(ownership.Id);
 
         List<Property__c> props;
-        if (isSalesforceId) {
-            props = [
-                SELECT Id, Name, Property_Number__c, Property_Address__c, Property_Category__c, 
-                       Built_Up_Area__c, Zone__c, Verification_Status__c, Ownership_Document__c, 
-                       Registration_Date__c, Latitude__c, Longitude__c, Construction_Year__c,
-                       OwnerId, Property_Owner__c, Property_Owner__r.Email
-                FROM Property__c 
-                WHERE Id = :identifier OR Property_Number__c = :identifier 
-                LIMIT 1
-            ];
-        } else {
-            props = [
-                SELECT Id, Name, Property_Number__c, Property_Address__c, Property_Category__c, 
-                       Built_Up_Area__c, Zone__c, Verification_Status__c, Ownership_Document__c, 
-                       Registration_Date__c, Latitude__c, Longitude__c, Construction_Year__c,
-                       OwnerId, Property_Owner__c, Property_Owner__r.Email
-                FROM Property__c 
-                WHERE Property_Number__c = :identifier 
-                LIMIT 1
-            ];
-        }
+        props = [
+            SELECT Id, Name, Property_Number__c, Property_Address__c, Property_Category__c,
+                   Built_Up_Area__c, Zone__c, Verification_Status__c, Ownership_Document__c,
+                   Registration_Date__c, Latitude__c, Longitude__c, Construction_Year__c,
+                   OwnerId, Owner__c, Owner__r.Name, Property_Owner__c,
+                   Property_Owner__r.Name, Property_Owner__r.Email
+            FROM Property__c
+            WHERE Id = :ownership.Id
+            LIMIT 1
+        ];
 
         if (props.isEmpty()) {
             throw new PropertyException('Property record not found for: ' + identifier);
@@ -108,16 +106,21 @@ public with sharing class PropertyService {
     public static List<Property__c> listProperties(String category, String zone, String status) {
         String query = 'SELECT Id, Name, Property_Number__c, Property_Address__c, Property_Category__c, ' +
                'Built_Up_Area__c, Zone__c, Municipal_Zone__c, Verification_Status__c, ' +
-               'Registration_Date__c, Latitude__c, Longitude__c, Property_Owner__c, ' +
-               'Property_Owner__r.Name, Property_Owner__r.Email ' +
+               'Registration_Date__c, Latitude__c, Longitude__c, Owner__c, Owner__r.Name, ' +
+               'Property_Owner__c, Property_Owner__r.Name, Property_Owner__r.Email ' +
                'FROM Property__c ';
         List<String> conditions = new List<String>();
 
         // Enforce user isolation if not officer/admin
         if (!CivicTaxSecurityService.isOfficerOrAdmin()) {
-            Id currentUserId = UserInfo.getUserId();
-            String currentUserEmail = UserInfo.getUserEmail();
-            conditions.add('(OwnerId = :currentUserId OR Property_Owner__r.Email = :currentUserEmail)');
+            if (String.isNotBlank(CivicTaxSecurityService.getRequestIdentity())) {
+                Id citizenContactId = CivicTaxSecurityService.getCurrentCitizenContactId();
+                conditions.add('(Owner__c = :citizenContactId OR Property_Owner__c = :citizenContactId)');
+            } else {
+                Id currentUserId = UserInfo.getUserId();
+                String currentUserEmail = UserInfo.getUserEmail();
+                conditions.add('(OwnerId = :currentUserId OR Property_Owner__r.Email = :currentUserEmail)');
+            }
         }
 
         if (String.isNotBlank(category)) {
@@ -140,12 +143,67 @@ public with sharing class PropertyService {
         return (List<Property__c>) CivicTaxSecurityService.sanitizeRecords(AccessType.READABLE, props);
     }
 
+    // Update editable property details while preserving ownership and verification controls.
+    public static Property__c updatePropertyDetails(
+        Id propertyId,
+        String address,
+        String category,
+        Decimal builtUpArea,
+        String zone,
+        String ownershipDoc,
+        Integer constructionYear,
+        Decimal latitude,
+        Decimal longitude
+    ) {
+        if (propertyId == null) throw new PropertyException('Property ID is required.');
+        CivicTaxSecurityService.requireCanAccessProperty(propertyId);
+        if (!CivicTaxSecurityService.canUpdateObject('Property__c')) {
+            throw new CivicTaxSecurityService.SecurityException('Access Denied: Insufficient permissions to update Property.');
+        }
+        if (builtUpArea != null && builtUpArea <= 0) {
+            throw new PropertyException('Built-up area must be greater than zero.');
+        }
+
+        List<Property__c> records = [
+            SELECT Id, Verification_Status__c
+            FROM Property__c WHERE Id = :propertyId LIMIT 1
+        ];
+        if (records.isEmpty()) throw new PropertyException('Property record not found.');
+        Property__c prop = records[0];
+        if (prop.Verification_Status__c == 'VERIFIED') {
+            throw new PropertyException('Verified properties cannot be edited directly. Submit a reassessment request.');
+        }
+
+        if (address != null) prop.Property_Address__c = address.trim();
+        if (category != null) prop.Property_Category__c = category;
+        if (builtUpArea != null) prop.Built_Up_Area__c = builtUpArea;
+        if (zone != null) prop.Zone__c = zone;
+        if (ownershipDoc != null) prop.Ownership_Document__c = ownershipDoc;
+        if (constructionYear != null) prop.Construction_Year__c = constructionYear;
+        if (latitude != null) prop.Latitude__c = latitude;
+        if (longitude != null) prop.Longitude__c = longitude;
+
+        SObjectAccessDecision decision = Security.stripInaccessible(AccessType.UPDATABLE, new List<SObject>{ prop });
+        update decision.getRecords()[0];
+        return [
+            SELECT Id, Name, Property_Number__c, Property_Address__c, Property_Category__c,
+                   Built_Up_Area__c, Zone__c, Verification_Status__c, Ownership_Document__c,
+                   Registration_Date__c, Latitude__c, Longitude__c, Construction_Year__c,
+                   Owner__c, Owner__r.Name, Property_Owner__c, Property_Owner__r.Name
+            FROM Property__c WHERE Id = :propertyId LIMIT 1
+        ];
+    }
+
     // Update Verification Status (Officer / Admin Only)
     public static Property__c updateVerificationStatus(String propertyId, String newStatus, String officerNotes) {
         CivicTaxSecurityService.requireCanVerifyProperty();
 
         if (!CivicTaxSecurityService.canUpdateObject('Property__c')) {
             throw new CivicTaxSecurityService.SecurityException('Access Denied: Insufficient permissions to update Property verification.');
+        }
+        Set<String> allowedStatuses = new Set<String>{ 'PENDING', 'VERIFIED', 'RESUBMISSION_REQUIRED', 'REJECTED' };
+        if (!allowedStatuses.contains(newStatus)) {
+            throw new PropertyException('Invalid property verification status.');
         }
 
         return new SystemElevatedContext().executeUpdateVerification(propertyId, newStatus, officerNotes);

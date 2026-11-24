@@ -82,34 +82,32 @@ public with sharing class CivicTaxPropertyService {
             }
         }
 
-        if (prop.Property_Owner__c == null ||
-            prop.Owner__c == null) {
+        // Staff may register an unassigned property. Citizen registration
+        // always assigns an owner above, so only validate ownership supplied
+        // for staff-created records.
+        if (prop.Property_Owner__c != null || prop.Owner__c != null) {
+            Id ownerContactId = prop.Property_Owner__c != null
+                ? prop.Property_Owner__c
+                : prop.Owner__c;
 
-            throw new PropertyServiceException(
-                'A valid citizen Contact owner is required.'
-            );
-        }
+            if (ownerContactId.getSObjectType() != Contact.SObjectType) {
+                throw new PropertyServiceException(
+                    'Property owner must reference a Salesforce Contact.'
+                );
+            }
 
-        // Verify the Contact exists.
-        Id ownerContactId = prop.Property_Owner__c;
+            List<Contact> contacts = [
+                SELECT Id
+                FROM Contact
+                WHERE Id = :ownerContactId
+                LIMIT 1
+            ];
 
-        if (ownerContactId.getSObjectType() != Contact.SObjectType) {
-            throw new PropertyServiceException(
-                'Property owner must reference a Salesforce Contact.'
-            );
-        }
-
-        List<Contact> contacts = [
-            SELECT Id
-            FROM Contact
-            WHERE Id = :ownerContactId
-            LIMIT 1
-        ];
-
-        if (contacts.isEmpty()) {
-            throw new PropertyServiceException(
-                'The specified property owner Contact does not exist.'
-            );
+            if (contacts.isEmpty()) {
+                throw new PropertyServiceException(
+                    'The specified property owner Contact does not exist.'
+                );
+            }
         }
 
         // Duplicate property number validation.

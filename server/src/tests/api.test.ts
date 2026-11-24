@@ -1,6 +1,25 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { LocalRepository } from '../repositories/LocalRepository.js';
 
+function createMockSession(initial: Record<string, any> = {}): Record<string, any> {
+  return {
+    ...initial,
+    regenerate(callback: (error?: Error) => void) {
+      callback();
+    },
+    save(callback: (error?: Error) => void) {
+      callback();
+    },
+    destroy(callback: (error?: Error) => void) {
+      delete this.civicTaxUser;
+      delete this.salesforceSession;
+      delete this.oauthState;
+      delete this.codeVerifier;
+      callback();
+    },
+  };
+}
+
 describe('CivicTax Server Repository & Business Rules Test Suite', () => {
   let repo: LocalRepository;
 
@@ -139,7 +158,7 @@ describe('CivicTax Server Repository & Business Rules Test Suite', () => {
       let jsonResponse: any = null;
       const citizenReq: any = {
         body: { email: 'citizen@civictax.demo', password: 'Citizen@123' },
-        session: {},
+        session: createMockSession(),
       };
       const citizenRes: any = {
         status: (code: number) => {
@@ -165,7 +184,7 @@ describe('CivicTax Server Repository & Business Rules Test Suite', () => {
       // Test invalid password rejection
       const invalidReq: any = {
         body: { email: 'citizen@civictax.demo', password: 'WrongPassword' },
-        session: {},
+        session: createMockSession(),
       };
       loginLayer.route.stack[0].handle(invalidReq, citizenRes);
       expect(statusCode).toBe(401);
@@ -258,7 +277,7 @@ describe('CivicTax Server Repository & Business Rules Test Suite', () => {
       const { authRouter } = await import('../routes/authRoutes.js');
 
       // Request 1: Login
-      const sessionStore: Record<string, any> = {};
+      const sessionStore = createMockSession();
       const loginReq: any = {
         body: { email: 'officer@civictax.demo', password: 'Officer@123' },
         session: sessionStore,
@@ -319,6 +338,7 @@ describe('CivicTax Server Repository & Business Rules Test Suite', () => {
           logoutCode = code;
           return logoutRes;
         },
+        clearCookie: () => logoutRes,
         json: (data: any) => {
           logoutData = data;
         },

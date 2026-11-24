@@ -29,7 +29,7 @@ The Express gateway reads its configuration from `server/.env`. Below is the com
 | `SF_CLIENT_SECRET` | **Yes** | *(Consumer Secret from Connected App)* | OAuth 2.0 Consumer Secret. Stored **strictly** on backend; never exposed to browser. |
 | `SF_REDIRECT_URI` | **Yes** | `http://localhost:3001/auth/salesforce/callback` | Callback URL matching Connected App OAuth settings exactly. |
 | `SF_API_VERSION` | **Yes** | `v60.0` | Salesforce REST API and Apex REST version. |
-| `SESSION_SECRET` | **Yes** | `civictax_super_secure_random_session_secret_key_2026_dev` | Cryptographic secret for signing session cookies (`civictax.sid`). |
+| `SESSION_SECRET` | **Yes** | *(Use a separately generated random secret of at least 32 characters)* | Cryptographic secret for signing session cookies (`civictax.sid`). |
 | `FRONTEND_URL` | **Yes** | `http://localhost:5173` | Designated React origin allowed for CORS requests with credentials. |
 | `PORT` | **Yes** | `3001` | TCP port where Express Gateway listens. |
 | `NODE_ENV` | **Yes** | `development` | Runtime environment mode (`development` or `production`). |
